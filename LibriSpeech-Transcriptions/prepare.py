@@ -42,7 +42,7 @@ def process(config_file_name):
     config = None
     with open(Path('conf') / config_file_name) as config_file:
         config = yaml.full_load(config_file)
-    outPath = Path.resolve(Path(config_file_name) / config_file_name[:-5])
+    outPath = Path.resolve(Path(config_file_name) / '..' / config_file_name[:-5])
 
     if not os.path.exists(outPath):
         os.makedirs(outPath)
