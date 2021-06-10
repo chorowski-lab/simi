@@ -1,16 +1,17 @@
-# %% IMPORTS & DECLARATIONS
+import os
+import pathlib
 import random
+import tqdm
+from argparse import ArgumentError, ArgumentParser
 
 import numpy as np
 import sentencepiece
 from more_itertools import grouper
-from argparse import ArgumentError, ArgumentParser
-from env import *
-from src import *
-import tqdm
-import pathlib
 
-# %%
+from simi import dataset
+from simi import utils
+from simi.segmentation import segment_sentencepiece, segment_viterbi, train_sentencepiece
+
 
 def parseArgs():
     parser = ArgumentParser()
@@ -80,28 +81,35 @@ def run(args):
     sentencepiece.set_random_generator_seed(args.seed)
     if not os.path.exists(args.output):
         os.makedirs(args.output)
-
-    trainset = Data(args.trainset)
-    dataset = Data(args.dataset)
-    if args.viterbi:
-        assert args.clusterings is not None, "If viterbi is used you have to specify path to the clusterings"
-        dataset.load_clusterings(args.clusterings, args.alpha)
     
-    sp_prefix_path = args.output / 'sentencepiece' if args.sentencepiece_prefix is None else args.sentencepiece_prefix
+    if args.sentencepiece_prefix is None:
+        sp_prefix_path = args.output / 'sentencepiece'
+    else:
+        sp_prefix_path = args.sentencepiece_prefix
 
-    train_sentencepiece(trainset.data, sp_prefix_path, args.vocab_size)
+    if not utils.ensure_path(sp_prefix_path.with_suffix('.model')):
+        print('Training SentencePiece model...')
+        trainset = dataset.Data(args.trainset)
+        train_sentencepiece(trainset.data, sp_prefix_path, args.vocab_size)
+
+    print('Loading devset...')
+    devset = dataset.Data(args.dataset)
 
     if args.viterbi:
-        vit_formatted, vit_segmentation = segment_viterbi(dataset.data, dataset.clusterings, sp_prefix_path)
-        save_data(vit_formatted, dataset, args)
-        save_segmentation(vit_segmentation, vit_formatted, dataset, args.output / 'viterbi_segmentation', args)
+        print('Running Viterbi segmentation...')
+        assert args.clusterings is not None, "If viterbi is used you have to specify path to the clusterings"
+        devset.load_clusterings(args.clusterings, args.alpha)
 
-    sp_formatted, sp_segmentation = segment_sentencepiece(dataset.data, sp_prefix_path)
-    save_data(sp_formatted, dataset, args)
-    save_segmentation(sp_segmentation, sp_formatted, dataset, args.output / 'sentencepiece_segmentation', args)
+        vit_formatted, vit_segmentation = segment_viterbi(devset.data, devset.clusterings, sp_prefix_path)
+        save_data(vit_formatted, devset, args)
+        save_segmentation(vit_segmentation, vit_formatted, devset, args.output / 'viterbi_segmentation', args)
+
+    print('Running SentencePiece segmentation...')
+    sp_formatted, sp_segmentation = segment_sentencepiece(devset.data, sp_prefix_path)
+    save_data(sp_formatted, devset, args)
+    save_segmentation(sp_segmentation, sp_formatted, devset, args.output / 'sentencepiece_segmentation', args)
     
 
 if __name__ == "__main__":
     args = parseArgs()
     run(args)
-
