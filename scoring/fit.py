@@ -33,12 +33,18 @@ def rle(s, counts=True):
         return [k for k, v in itertools.groupby(s)]
 
 
-def load_alignments(csv_fpath, kind='phones'):
+def load_alignments(csv_fpath, kind='phones', simplify_arpabet=False):
     assert kind in ('words',  'phones')
 
     with open(csv_fpath, 'r') as f:
         reader = csv.reader(f)
-        return [(float(l[0]), float(l[1]), l[2]) for l in reader if l[-1] == kind]
+        tuples = [(float(l[0]), float(l[1]), l[2]) for l in reader if l[-1] == kind]
+
+    if simplify_arpabet:
+        a, b, phones = zip(*tuples)
+        tuples = list(zip(a, b, simplify(phones)))
+
+    return tuples
 
 
 def alignment_to_ids(alignment, phone2id, stride=10, simplify_arpabet=False):
@@ -56,7 +62,7 @@ def alignment_to_ids(alignment, phone2id, stride=10, simplify_arpabet=False):
 
 
 def simplify(phones):
-    # phones = [re.sub('\d', '0', p) for p in phones]
+    phones = [re.sub('\d', '0', p) for p in phones]
     phones = [re.sub('(spn|sil)', 'sp', p) for p in phones]
     return phones
 
@@ -207,7 +213,8 @@ def score_cpc_quantizations(gt_alignments, quantized_outputs,
 
 def score_cpc_quantizations_matching_sentpieces_with_phones(
     gt_alignments, quantized_outputs, quantized_format='csv', shift=-1,
-    stride=10, subsample=1, per_ignore_short_blocks=1, print_sample=0):
+    stride=10, subsample=1, simplify_arpabet=False,
+    per_ignore_short_blocks=1, print_sample=0):
 
     csvs = {Path(f).stem: f for f in Path(gt_alignments).rglob('*.csv')}
 
@@ -237,14 +244,16 @@ def score_cpc_quantizations_matching_sentpieces_with_phones(
 
     piece2phone = defaultdict(lambda: defaultdict(float))
 
+    simplify_arpabet = True  # XXX
+
     for key in tqdm.tqdm(csvs.keys()):
 
-        ali = load_alignments(csvs[key])
+        ali = load_alignments(csvs[key], simplify_arpabet=simplify_arpabet)
         t = IntervalTree()
         for (start, end, ph) in ali:
             t[start:end] = ph
 
-        sps = load_alignments(csvs_sp[key])
+        sps = load_alignments(csvs_sp[key], simplify_arpabet=simplify_arpabet)
         for (start, end, sp) in sps:
             for iv in t[start:end]:
                 piece2phone[sp][iv.data] += iv.end - iv.begin
@@ -313,6 +322,9 @@ def score_cpc_quantizations_matching_sentpieces_with_phones(
                     print(l[i:i+max_line])
                 print()
 
+            print('Pseudophone counts')
+            print(counts)
+            print('Pseudophone durations')
             print(durs)
 
         wers.append(jiwer.wer(gt, cl))

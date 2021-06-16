@@ -12,4 +12,4 @@ quant_dir = (Path(quantized) / '..').resolve().name
 acc = score_cpc_quantizations_matching_sentpieces_with_phones(
     gt, quantized, shift=shift)
 
-print(f'Framewise accuracy: {acc:.2f} % ({quant_dir})')
+print(f'PER: {acc:.2f} % ({quant_dir})')
