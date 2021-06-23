@@ -214,7 +214,7 @@ def score_cpc_quantizations(gt_alignments, quantized_outputs,
 def score_cpc_quantizations_matching_sentpieces_with_phones(
     gt_alignments, quantized_outputs, quantized_format='csv', shift=-1,
     stride=10, subsample=1, simplify_arpabet=False,
-    per_ignore_short_blocks=1, print_sample=0):
+    per_ignore_short_blocks=1, print_sample=0, save_collapsed_phones=False):
 
     csvs = {Path(f).stem: f for f in Path(gt_alignments).rglob('*.csv')}
 
@@ -253,7 +253,7 @@ def score_cpc_quantizations_matching_sentpieces_with_phones(
         for (start, end, ph) in ali:
             t[start:end] = ph
 
-        sps = load_alignments(csvs_sp[key], simplify_arpabet=simplify_arpabet)
+        sps = load_alignments(csvs_sp[key], simplify_arpabet=False)
         for (start, end, sp) in sps:
             for iv in t[start:end]:
                 piece2phone[sp][iv.data] += iv.end - iv.begin
@@ -272,6 +272,22 @@ def score_cpc_quantizations_matching_sentpieces_with_phones(
             return [(k, sum(1 for _ in v)) for k, v in itertools.groupby(s)]
         else:
             return [k for k, v in itertools.groupby(s)]
+
+    if save_collapsed_phones:
+        # Collapses phones to their regexps, e.g., aaaaaFFFFggg --> a+F+g+
+        pieceRLE2phone = defaultdict(Counter)
+        with open('pieces2phones.txt', 'w') as f:
+            for pi, ph in piece2phone.items():
+                rle_ = ''.join(rle(pi, counts=False))
+                f.write(f'{pi} {rle_} {ph}\n')
+                pieceRLE2phone[rle_][ph] += 1
+
+        s = 0
+        for rle_, cnt in pieceRLE2phone.items():
+            print(cnt, cnt.most_common(1))
+            s += cnt.most_common(1)[0][1]
+        print('After collapsing:', len(pieceRLE2phone))
+        print('Collapsed properly:', s)
 
     wers = []
     # Map sentencepieces to phones
