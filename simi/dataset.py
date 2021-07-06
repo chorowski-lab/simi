@@ -7,6 +7,7 @@ from collections import defaultdict
 import numpy as np
 from progressbar import ProgressBar
 
+
 class Data(object):
     def __init__(self, path):
         self.filenames = []
@@ -37,7 +38,8 @@ class Clusterings(object):
     def __getitem__(self, i):
         if i not in self.cache.keys():
             dists = np.load(os.path.join(self.path, self.filenames[i] + '.npy')).reshape(-1, 50)
-            self.cache[i] = dists * self.alpha - np.log(np.sum(np.exp(dists * self.alpha), axis=-1))[:,np.newaxis]
+            logprobs = np.log(1.0 / dists) * self.alpha
+            self.cache[i] = logprobs - np.log(np.sum(np.exp(logprobs), axis=-1))[:,np.newaxis]
 
         return self.cache[i]
 
