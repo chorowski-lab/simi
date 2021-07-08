@@ -34,19 +34,20 @@ def rate_segmentation(gt_segs, es_segs, tolerance=2):
 
 
 class LibriSpeechSegmentation(object):
-    def __init__(self, name):
+    def __init__(self, name=None, path=None):
         self.phones = defaultdict(list)
         self.words = defaultdict(list)
         self.phone_list = set()
-        for root, dirs, files in os.walk(os.path.join(ALIGNMENTS_ROOTPATH, name)):
+        path = os.path.join(ALIGNMENTS_ROOTPATH, name) if path is None else path
+        for root, dirs, files in os.walk(path):
             for file in files:
                 if file.endswith('.csv'):
                     for line in open(os.path.join(root, file), 'r', encoding='utf8'):
                         t1, t2, q, kind = line.strip().split(',')
                         if kind == 'phones':
                             self.phone_list.add(q)
-                        n1, n2 = int(float(t1)*100), int(float(t2)*100)
-                        assert n1 < n2
+                        n1, n2 = int(round(float(t1)*100)), int(round(float(t2)*100))
+                        assert n1 < n2, f'line: {line}, n1: {n1}, n2: {n2}'
                         d = self.words if kind == 'words' else self.phones
                         fname = file[:-4]
                         if fname in d.keys():
@@ -73,7 +74,7 @@ def train_sentencepiece(data, prefix, vocab_size, train=True):
         if not train:
             raise Exception(f"Tried to segment data, but there is no SentencePiece model at {prefix}. Maybe set train=True?")
         print("Training sentencepiece model...", flush=True)
-        SentencePieceTrainer.train(sentence_iterator=iter(data_to_string_arrays(data)), model_prefix=prefix, vocab_size=vocab_size)
+        SentencePieceTrainer.train(sentence_iterator=iter(data_to_string_arrays(data)), model_prefix=prefix, vocab_size=vocab_size, max_sentencepiece_length=100)
 
 
 def segment_sentencepiece(data, prefix):
