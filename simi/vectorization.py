@@ -23,7 +23,11 @@ def encode_and_format(segmentation, w2v):
         nonlocal d, segmentation
         return [[labels[d[word]] for word in sentence] for sentence in segmentation]
 
-    return res, cnt, r
+    def m(labels):
+        nonlocal d
+        return { word: labels[d[word]] for word in d.keys() }
+
+    return res, cnt, r, m
 
 
 def find_closest_encodings(segmentation, w2v):
@@ -61,7 +65,11 @@ def find_closest_encodings(segmentation, w2v):
         nonlocal d, segmentation
         return [[labels[d[word]] for word in sentence] for sentence in segmentation]
 
-    return res, cnt, r
+    def m(labels):
+        nonlocal d
+        return { word: labels[d[word]] for word in d.keys() }
+
+    return res, cnt, r, m
 
 
 def vectorize(data, path, size, train=True):
@@ -78,9 +86,9 @@ def vectorize(data, path, size, train=True):
             raise Exception(f"Tried to eval word2vec, but there is no model at {path}. Maybe set train=True?")
         # train word2vec
         print("Training word2vec model...", flush=True)
-        Word2Vec(sentences=data, min_count=1, size=size).save(path)
+        Word2Vec(sentences=data, min_count=1, size=size).save(str(path))
     
-    model = Word2Vec.load(path)
+    model = Word2Vec.load(str(path))
     if train:
         return encode_and_format(data, model.wv)
     else:
