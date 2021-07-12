@@ -1,4 +1,4 @@
-from .utils import ensure_path
+from simi.utils import ensure_path
 import numpy as np
 import pickle
 from sklearn.cluster import KMeans

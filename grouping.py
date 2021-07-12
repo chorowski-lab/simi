@@ -1,17 +1,9 @@
 import os
 import pathlib
-import random
-import tqdm
-from argparse import ArgumentError, ArgumentParser
-import pickle 
+from argparse import ArgumentParser
 
 from collections import defaultdict
-import numpy as np
-import sentencepiece
-from more_itertools import grouper
 
-from simi import dataset
-from simi import utils
 from simi.vectorization import vectorize
 from simi.clusterization import cluster_kmeans
 
@@ -67,6 +59,7 @@ class LibriSpeechSegmentation(object):
                 for x in sample:
                     output.write(','.join(map(str, x)) + '\n')
 
+
 def run(args):
     print(f'Loading train segmentation...')
     segmentation = LibriSpeechSegmentation(args.segmentation)
@@ -86,6 +79,7 @@ def run(args):
     segmentation.rename(word_map)
     segmentation.save(args.output)
     print('Done!')
+
 
 class StubArgs(object):
     def __init__(self):

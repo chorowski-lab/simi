@@ -1,15 +1,13 @@
 import os
 import pathlib
 import random
-import tqdm
 from argparse import ArgumentError, ArgumentParser
+import pickle
 
 import numpy as np
 import sentencepiece
-from more_itertools import grouper
 
-from simi import dataset
-from simi import utils
+from simi import utils, dataset
 from simi.segmentation import segment_sentencepiece, segment_viterbi, train_sentencepiece
 
 
@@ -33,11 +31,13 @@ def parseArgs():
     parser.add_argument('--viterbi', action='store_true',
                         help='Use Viterbi segmentation instead of sentencepiece\'s default')
     parser.add_argument('--alpha', type=float, default=1.0, 
-                        help='Temperature for sharpening/smoothening clustering distribution. More than 1: sharpening, less than 1: smoothening')
+                        help='Temperature for sharpening/smoothening clustering distribution. More than 1: sharpening, less than 1: smoothening. Deafult: 1.0')
     parser.add_argument('--data_output_format', type=str, default='str',
-                        help='Output format of the transformed dataset. Either \'str\' (arrays of strings) or \'pkl\' (similar to the baseline quantization, as pickle)')
-    parser.add_argument('--segmentation_output_format', type=str, default='pkl',
-                        help='Output format of the segmentation. Either \'pkl\' (pickled array of breakpoints) or \'csv\' (similar to LibriSpeech alignments)')
+                        help='Output format of the transformed dataset. Either \'str\' (arrays of strings, deafult) or \'pkl\' (similar to the baseline quantization, as pickle)')
+    parser.add_argument('--segmentation_output_format', type=str, default='csv',
+                        help='Output format of the segmentation. Either \'pkl\' (pickled array of breakpoints) or \'csv\' (similar to LibriSpeech alignments, default)')
+    parser.add_argument('--max_piece_length', type=int, default=100,
+                        help='Max length of sentence piece. Default=100')
     return parser.parse_args()
 
 
@@ -75,7 +75,6 @@ def save_segmentation(segmentation, formatted, dataset, path, args):
 
 
 def run(args):
-    print(args)
     random.seed(args.seed)
     np.random.seed(args.seed)
     sentencepiece.set_random_generator_seed(args.seed)
@@ -88,9 +87,9 @@ def run(args):
         sp_prefix_path = args.sentencepiece_prefix
 
     if not utils.ensure_path(sp_prefix_path.with_suffix('.model')):
-        print('Training SentencePiece model...')
+        print('Loading trainset...')
         trainset = dataset.Data(args.trainset)
-        train_sentencepiece(trainset.data, sp_prefix_path, args.vocab_size)
+        train_sentencepiece(trainset.data, sp_prefix_path, args.vocab_size, max_piece_length=args.max_piece_length)
 
     print('Loading devset...')
     devset = dataset.Data(args.dataset)

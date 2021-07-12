@@ -1,21 +1,38 @@
 import json
 import os
+import pathlib
+from argparse import ArgumentParser
 from pathlib import Path
-from random import shuffle
 from time import time
+from urllib import parse
 
 import numpy as np
 import progressbar
 import torch
 from cpc.dataset import findAllSeqs
-from cpc.feature_loader import buildFeature, buildFeature_batch
+from cpc.feature_loader import buildFeature_batch
 
-from utils_functions import (loadClusterModule, loadCPCFeatureMaker, readArgs,
-                             writeArgs)
+from simi.clusterization import loadClusterModule, loadCPCFeatureMaker, readArgs
 
-CUDA = False
 
-def quantize_file(file_path, cpc_feature_function, clusterModule):
+def parseArgs():
+    parser = ArgumentParser()
+
+    parser.add_argument('clustering_checkpoint', type=pathlib.Path,
+                        help='Path to the clustering checkpoint')
+    parser.add_argument('dataset', type=pathlib.Path,
+                        help='Path to the dataset, which is to be quantized')
+    parser.add_argument('output', type=pathlib.Path,
+                        help='Output path')
+    parser.add_argument('--file_extension', type=str, default='vaw',
+                        help='File extension of the audio files')
+    parser.add_argument('--CUDA', action='store_true', 
+                        help='Use CUDA')
+    return parser.parse_args()
+
+
+
+def quantize_file(file_path, cpc_feature_function, clusterModule, args):
     # Get CPC features
     cFeatures = cpc_feature_function(file_path)
     if clusterModule.Ck.is_cuda:
@@ -27,17 +44,17 @@ def quantize_file(file_path, cpc_feature_function, clusterModule):
     cFeatures = cFeatures.view(1, -1, clusterModule.Ck.size(-1))
 
     clustered = clusterModule(cFeatures)
-    if CUDA:
+    if args.CUDA:
         clusterModule = clusterModule.cuda()
 
     return clustered.detach().cpu().numpy().reshape(-1, clusterModule.k)
 
-def main():
-    pathClusteringCheckpoint = '/pio/data/zerospeech2021/checkpoints/CPC-big-kmeans50/clustering_kmeans50/clustering_CPC_big_kmeans50.pt'
-    pathDB = '/pio/data/zerospeech2021/LibriSpeech/test-clean'
-    pathOutputDir = '/pio/scratch/1/i290956/zs2021/clusterings/LibriSpeech/test-clean'
+def main(args):
+    pathClusteringCheckpoint = str(args.clustering_checkpoint) # '/pio/data/zerospeech2021/checkpoints/CPC-big-kmeans50/clustering_kmeans50/clustering_CPC_big_kmeans50.pt'
+    pathDB = str(args.dataset) #  '/pio/data/zerospeech2021/LibriSpeech/test-clean'
+    pathOutputDir = str(args.output) # '/pio/scratch/1/i290956/zs2021/clusterings/LibriSpeech/test-clean'
 
-    file_extension = 'vaw'
+    file_extension = args.file_extension
     seqNames, _ = findAllSeqs(pathDB, speaker_level=1, extension=file_extension, loadCache=True)
 
     if not os.path.exists(pathOutputDir):
@@ -68,7 +85,7 @@ def main():
     print("")
     print(f"Loading ClusterModule at {pathClusteringCheckpoint}")
     clusterModule = loadClusterModule(pathClusteringCheckpoint)
-    if CUDA:
+    if args.CUDA:
         clusterModule.cuda()
     print("ClusterModule loaded!")
 
@@ -88,7 +105,7 @@ def main():
         featureMaker = torch.nn.Sequential(featureMaker, dimRed)
     if not clustering_args.train_mode:
         featureMaker.eval()
-    if CUDA:
+    if args.CUDA:
         featureMaker.cuda()
     def cpc_feature_function(x): 
         return buildFeature_batch(featureMaker, x,seqNorm=False, strict=True,
@@ -112,7 +129,7 @@ def main():
             # Quantization
             f = open(outputPath, 'wb')
             f.close()
-            clustered_file = quantize_file(file_path, cpc_feature_function, clusterModule)
+            clustered_file = quantize_file(file_path, cpc_feature_function, clusterModule, args)
             np.save(outputPath, clustered_file)
 
     bar.finish()
@@ -120,4 +137,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    args = parseArgs()
+    main(args)

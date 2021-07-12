@@ -6,14 +6,11 @@ import tqdm
 from numba import jit
 from progressbar import ProgressBar
 from sentencepiece import SentencePieceProcessor, SentencePieceTrainer
+from simi.utils import *
 
 from simi.viterbi import sentpiece_viterbi
 
-from .score import Score
-from .utils import *
-
 ALIGNMENTS_ROOTPATH = '/pio/data/zerospeech2021/librispeech_alignments'
-
 
 def rate_segmentation(gt_segs, es_segs, tolerance=2):
     Nhit, Nref, Nf = 0, 0, 0
@@ -68,13 +65,13 @@ class LibriSpeechSegmentation(object):
         return words_score, phones_score
 
 
-def train_sentencepiece(data, prefix, vocab_size, train=True):
+def train_sentencepiece(data, prefix, vocab_size, train=True, max_piece_length=100):
     model_path = str(prefix) + '.model'
     if not ensure_path(model_path):
         if not train:
             raise Exception(f"Tried to segment data, but there is no SentencePiece model at {prefix}. Maybe set train=True?")
         print("Training sentencepiece model...", flush=True)
-        SentencePieceTrainer.train(sentence_iterator=iter(data_to_string_arrays(data)), model_prefix=prefix, vocab_size=vocab_size, max_sentencepiece_length=100)
+        SentencePieceTrainer.train(sentence_iterator=iter(data_to_string_arrays(data)), model_prefix=prefix, vocab_size=vocab_size, max_sentencepiece_length=max_piece_length)
 
 
 def segment_sentencepiece(data, prefix):

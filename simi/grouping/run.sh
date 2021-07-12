@@ -7,7 +7,7 @@
 for VS_ in $VS; do
     for VVS_ in $VVS; do
 
-        python cluster.py \
+        python grouping.py \
             /pio/scratch/1/i290956/zs2021/simi/models/segmentations_mpl100/train-clean-100_train-clean-100_vs${VS_}_a${ALPHA}/viterbi_segmentation/ \
             /pio/scratch/1/i290956/zs2021/simi/models/segmentations_mpl100/train-clean-100_train-clean-100_vs${VS_}_a${ALPHA}/viterbi_segmentation_clustered_${VVS_}/ \
             --word2vec_path /pio/scratch/1/i290956/zs2021/simi/models/word2vec_mpl100_sp/train-clean-100_vs${VS_}_a${ALPHA}_c${VVS_} \
