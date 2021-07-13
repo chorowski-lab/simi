@@ -37,3 +37,13 @@ To get the description of parameters run: `python segmentation.py --help`.
 The idea is based on the fact that segmentation using sentencepiece requires large vocab to work, but it results in multiple different sentence pieces mapping to the same phoneme. In order to reduce number of sentence pieces, we run vord2vec on them and then kmeans, grouping and merging multiple sentencepieces together. It never increases PER, but (greatly) reduces vocab size.
 
 To get the description of parameters run: `python grouping.py --help`.
+
+## Statistics
+
+In folder `simi/statistics` there are python scripts for computing various statistics.
+
+### Pieces
+
+Command: `python simi/statistics/pieces.py <segmentation_path>`
+
+It prints the number of pieces and max/min/mean piece counts.
