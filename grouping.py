@@ -1,5 +1,5 @@
 import os
-import pathlib
+from pathlib import Path
 from argparse import ArgumentParser
 
 from collections import defaultdict
@@ -10,15 +10,15 @@ from simi.clusterization import cluster_kmeans
 def parseArgs():
     parser = ArgumentParser()
 
-    parser.add_argument('segmentation', type=pathlib.Path,
+    parser.add_argument('segmentation', type=Path,
                         help='Path to the segmentation')
-    parser.add_argument('output', type=pathlib.Path,
+    parser.add_argument('output', type=Path,
                         help='Output path')
     parser.add_argument('--vocab_size', type=int, default=100,
                         help='Size of the output vocab size, 100 by default')
     parser.add_argument('--word2vec_size', type=int, default=100,
                         help='Size of the word2vec vectors, 100 by default')
-    parser.add_argument('--word2vec_path', type=pathlib.Path,
+    parser.add_argument('--word2vec_path', type=Path,
                         help='Path to the word2vec model, if not specified/empty then it will be computed')
     parser.add_argument('--kmeans_path', type=str,
                         help='Path to the kmeans model, if not specified/empty then it will be computed')
@@ -32,13 +32,11 @@ class LibriSpeechSegmentation:
         self.data = defaultdict(list)
         self.vocab = set()
         super().__init__()
-        for root, _, files in os.walk(path):
-            for file in files:
-                if file.endswith('.csv'):
-                    for line in open(os.path.join(root, file), 'r', encoding='utf8'):
-                        t1, t2, q, kind = line.strip().split(',')
-                        self.data[file[:-4]].append((t1, t2, q, kind))
-                        self.vocab.add(q)
+        for csv in Path(path).rglob('*.csv'):
+            for line in open(csv, 'r', encoding='utf8'):
+                t1, t2, q, kind = line.strip().split(',')
+                self.data[csv.stem].append((t1, t2, q, kind))
+                self.vocab.add(q)
 
     def __getitem__(self, fname):
         return self.data[fname]
@@ -80,21 +78,7 @@ def run(args):
     segmentation.save(args.output)
     print('Done!')
 
-
-class StubArgs(object):
-    def __init__(self):
-        self.seed = 290956
-        self.segmentation = pathlib.Path('/pio/scratch/1/i290956/zs2021/simi/models/segmentations/train-clean-100_train-clean-100_vs1000_a1.0/viterbi_segmentation/')
-        # self.test_seg = pathlib.Path('/pio/scratch/1/i290956/zs2021/simi/models/segmentations/train-clean-100_dev-clean_vs1000_a1.0/viterbi_segmentation/')
-        # self.output = pathlib.Path('/pio/scratch/1/i290956/zs2021/simi/models/segmentations/train-clean-100_train-clean-100_vs1000_a1.0/viterbi_segmentation_clustered_100/')
-        self.output = pathlib.Path('/pio/scratch/1/i290956/zs2021/simi/tmp/segmentation')
-        self.vocab_size = 100
-        self.word2vec_size = 100
-        self.word2vec_path = None
-        self.kmeans_path = None
-
     
 if __name__ == "__main__":
     args = parseArgs()
-    # args = StubArgs()
     run(args)

@@ -1,12 +1,13 @@
 import os
 from collections import defaultdict
+from simi.utils import data_to_string_arrays, ensure_path, get_segmentation, string_to_int_array
+from simi.score import Score
 
 import numpy as np
 import tqdm
+from pathlib import Path
 from numba import jit
-from progressbar import ProgressBar
 from sentencepiece import SentencePieceProcessor, SentencePieceTrainer
-from simi.utils import *
 
 from simi.viterbi import sentpiece_viterbi
 
@@ -36,26 +37,22 @@ class LibriSpeechSegmentation(object):
         self.words = defaultdict(list)
         self.phone_list = set()
         path = os.path.join(ALIGNMENTS_ROOTPATH, name) if path is None else path
-        for root, dirs, files in os.walk(path):
-            for file in files:
-                if file.endswith('.csv'):
-                    for line in open(os.path.join(root, file), 'r', encoding='utf8'):
-                        t1, t2, q, kind = line.strip().split(',')
-                        if kind == 'phones':
-                            self.phone_list.add(q)
-                        n1, n2 = int(round(float(t1)*100)), int(round(float(t2)*100))
-                        assert n1 < n2, f'line: {line}, n1: {n1}, n2: {n2}'
-                        d = self.words if kind == 'words' else self.phones
-                        fname = file[:-4]
-                        if fname in d.keys():
-                            assert d[fname][-1] <= n1
-
-                            if d[fname][-1] != n1:
-                                d[fname].append(n1)
-                            d[fname].append(n2)
-                        else:
-                            d[fname] = [0, n1, n2] if n1 != 0 else [0, n2]
-        # print(len(self.phone_list))
+        for csv in Path(path).rglob('*.csv'):
+            for line in open(csv, 'r', encoding='utf8'):
+                t1, t2, q, kind = line.strip().split(',')
+                if kind == 'phones':
+                    self.phone_list.add(q)
+                n1, n2 = int(round(float(t1)*100)), int(round(float(t2)*100))
+                assert n1 < n2, f'line: {line}, n1: {n1}, n2: {n2}'
+                d = self.words if kind == 'words' else self.phones
+                if csv.stem in d.keys():
+                    assert d[csv.stem][-1] <= n1
+                    
+                    if d[csv.stem][-1] != n1:
+                        d[csv.stem].append(n1)
+                    d[csv.stem].append(n2)
+                else:
+                    d[csv.stem] = [0, n1, n2] if n1 != 0 else [0, n2]
 
     def rate(self, segmentation, filenames, tolerance=2):
         aligned_phones = list(self.phones[fname] for fname in filenames)
@@ -93,7 +90,7 @@ def segment_sentencepiece(data, prefix):
     return formatted, segmentation
 
 
-def segment_viterbi(data, distribution, prefix: pathlib.Path):
+def segment_viterbi(data, distribution, prefix: Path):
     """Segment data using viterbi on center prob distribution
     
     Params:

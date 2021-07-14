@@ -14,10 +14,10 @@ def parseArgs():
 
 
 def print_statistics(d, nl='\t'):
-    print(f"{nl}Total different pieces: {len(d.keys())}", \
-        f"Total pieces: \t\t{sum(d.values())}", \
-        f"Min piece count: \t{min(d.values())}", \
-        f"Mean piece count: \t{sum(d.values()) / len(d.keys())}", \
+    print(f"{nl}Total different pieces: {len(d.keys())}",
+        f"Total pieces: \t\t{sum(d.values())}",
+        f"Min piece count: \t{min(d.values())}",
+        f"Mean piece count: \t{sum(d.values()) / len(d.keys())}",
         f"Max piece count: \t{max(d.values())}", sep='\n'+nl)
     
 
@@ -37,7 +37,7 @@ def main(args):
             elif kind =='words':
                 words[q] += 1
             else:
-                raise f'Invalid piece type, expected \'phones\' or \'words\', but got {kind} in file {file}.'
+                raise f'Invalid piece type, expected \'phones\' or \'words\', but got {kind} in file {csv.name}.'
 
     if len(phones.keys()) > 0:
         print('Statistics for phones:')
