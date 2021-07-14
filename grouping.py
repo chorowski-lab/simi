@@ -27,7 +27,7 @@ def parseArgs():
     return parser.parse_args()
 
 
-class LibriSpeechSegmentation(object):
+class LibriSpeechSegmentation:
     def __init__(self, path) -> None:
         self.data = defaultdict(list)
         self.vocab = set()

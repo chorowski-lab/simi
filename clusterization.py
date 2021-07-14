@@ -24,9 +24,9 @@ def parseArgs():
                         help='Path to the dataset, which is to be quantized')
     parser.add_argument('output', type=pathlib.Path,
                         help='Output path')
-    parser.add_argument('--file_extension', type=str, default='vaw',
+    parser.add_argument('--file-ext', type=str, default='wav',
                         help='File extension of the audio files')
-    parser.add_argument('--CUDA', action='store_true', 
+    parser.add_argument('--cuda', action='store_true', 
                         help='Use CUDA')
     return parser.parse_args()
 
@@ -44,7 +44,7 @@ def quantize_file(file_path, cpc_feature_function, clusterModule, args):
     cFeatures = cFeatures.view(1, -1, clusterModule.Ck.size(-1))
 
     clustered = clusterModule(cFeatures)
-    if args.CUDA:
+    if args.cuda:
         clusterModule = clusterModule.cuda()
 
     return clustered.detach().cpu().numpy().reshape(-1, clusterModule.k)
@@ -54,8 +54,7 @@ def main(args):
     pathDB = str(args.dataset) #  '/pio/data/zerospeech2021/LibriSpeech/test-clean'
     pathOutputDir = str(args.output) # '/pio/scratch/1/i290956/zs2021/clusterings/LibriSpeech/test-clean'
 
-    file_extension = args.file_extension
-    seqNames, _ = findAllSeqs(pathDB, speaker_level=1, extension=file_extension, loadCache=True)
+    seqNames, _ = findAllSeqs(pathDB, speaker_level=1, extension=args.file_ext, loadCache=True)
 
     if not os.path.exists(pathOutputDir):
         print("")
@@ -85,7 +84,7 @@ def main(args):
     print("")
     print(f"Loading ClusterModule at {pathClusteringCheckpoint}")
     clusterModule = loadClusterModule(pathClusteringCheckpoint)
-    if args.CUDA:
+    if args.cuda:
         clusterModule.cuda()
     print("ClusterModule loaded!")
 
@@ -105,7 +104,7 @@ def main(args):
         featureMaker = torch.nn.Sequential(featureMaker, dimRed)
     if not clustering_args.train_mode:
         featureMaker.eval()
-    if args.CUDA:
+    if args.cuda:
         featureMaker.cuda()
     def cpc_feature_function(x): 
         return buildFeature_batch(featureMaker, x,seqNorm=False, strict=True,
