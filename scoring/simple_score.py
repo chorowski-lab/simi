@@ -10,6 +10,6 @@ shift = int(sys.argv[3])
 
 quant_dir = (Path(quantized) / '..').resolve().name
 acc = score_cpc_quantizations_matching_sentpieces_with_phones(
-    gt, quantized, shift=shift)
+    gt, quantized, shift=shift, per_ignore_short_blocks=0, print_sample=1)
 
 print(f'PER: {acc:.2f} % ({quant_dir})')

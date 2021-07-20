@@ -3,7 +3,6 @@ from progressbar import ProgressBar
 from env import TRANSCRIPTIONS_DIR, ROOTPATH
 from .utils import get_spaces_pos
 from .segmentation import LibriSpeechSegmentation
-from collections import defaultdict
 import numpy as np
 from progressbar import ProgressBar
 
