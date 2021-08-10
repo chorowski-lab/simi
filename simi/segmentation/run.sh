@@ -13,7 +13,7 @@ source config.sh
 #     --trainset=${LIBRISPEECH_QUANTIZED_TRAIN_100} \
 #     --vocab_size=${VOCAB_SIZE} \
 #     --sentencepiece_prefix=models/sentencepieces/${TRAINSET}_vs${VOCAB_SIZE} \
-#     --segmentation_output_format=csv \
+#     --output_format=csv \
 #     --alpha=${ALPHA} \
 #     --clusterings=${LIBRISPEECH_CLUSTERINGS_TRAIN_100} \
 #     --viterbi
@@ -27,8 +27,7 @@ python eval_segmentation.py \
     $LIBRISPEECH_QUANTIZED_TRAIN_100 \
     models/sentencepieces/${TRAINSET}_vs${VOCAB_SIZE} \
     models/segmentations/${TRAINSET}_${TESTSET}_vs${VOCAB_SIZE}_a${ALPHA} \
-    --data_output_format=str \
-    --segmentation_output_format=csv \
+    --output_format=csv,txt \
     --clusterings=${LIBRISPEECH_CLUSTERINGS_TRAIN_100} \
     --viterbi \
     --alpha=${ALPHA}
