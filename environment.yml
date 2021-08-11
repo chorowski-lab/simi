@@ -188,4 +188,3 @@ dependencies:
     - sacrebleu==1.5.1
     - sentencepiece==0.1.95
     - zipp==3.4.1
-prefix: /pio/scratch/1/i290956/miniconda3/envs/semantic
