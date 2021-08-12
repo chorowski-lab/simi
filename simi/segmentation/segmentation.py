@@ -1,6 +1,7 @@
 import os
 from collections import defaultdict
-from simi.utils import data_to_string_arrays, ensure_path, get_segmentation, string_to_int_array
+from simi.stringify import string_to_int_array
+from simi.utils import data_to_string_arrays, ensure_path, get_segmentation
 from simi.score import Score
 
 import numpy as np
