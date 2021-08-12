@@ -39,7 +39,7 @@ def save_segmentation(formatted, dataset, path, args):
         raise Exception(f'Output format should be a comma sparated list')
 
     
-    if 'str' in args.output_format.split(','):
+    if 'txt' in args.output_format.split(','):
         with open(args.output / 'segmented_outputs.txt', 'w') as output:
             for sentence, fname in zip(formatted, dataset.filenames):
                 output.write(f'{fname} {" ".join(sentence)}\n')
