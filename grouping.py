@@ -27,6 +27,8 @@ def parseArgs():
                         help='Path to the kmeans model, if not specified/empty then it will be computed')
     parser.add_argument('--seed', type=int, default=290956,
                         help='Random seed')
+    parser.add_argument('--eval', action='store_true', 
+                        help='Eval only mode (crash if w2v model is not computed)')
     return parser.parse_args()
 
 
@@ -111,7 +113,7 @@ def run(args):
 
     word2vec_path = f'./tmp/word2vec/s{args.seed}' if args.word2vec_path is None else args.word2vec_path
     sentences = segmentation.to_sentences()
-    encodings, weights, reconstruct, build_map = vectorize(sentences, word2vec_path, args.word2vec_size)
+    encodings, weights, reconstruct, build_map = vectorize(sentences, word2vec_path, args.word2vec_size, train=not args.eval)
 
 
     kmeans_path = f'./tmp/kmeans/s{args.seed}_cosine' if args.kmeans_path is None else args.kmeans_path
