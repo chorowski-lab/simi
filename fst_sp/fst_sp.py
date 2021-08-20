@@ -41,8 +41,8 @@ class SentencePieceTrainer:
         self.PIECE_SYMB = PIECE_SYMB
     
     # Create an FST that matches sentencepieces to texts. 
-# This one should be pruned after each iteration to speed things up.
-
+    # This one should be pruned after each iteration to speed things up.
+    
     def get_sp_to_char(self, pieces, arc_type='log', piece_symb=None, char_symb=None):
         if piece_symb is None:
             piece_symb = self.PIECE_SYMB
@@ -55,19 +55,24 @@ class SentencePieceTrainer:
         sp_to_char.set_start(0)
         log_one = fst.Weight.one(sp_to_char.weight_type())
         sp_to_char.set_final(0, log_one)
-
-        for piece in pieces:
+        
+        prefix2state = [('', 0)]
+        for piece in sorted(pieces, key=lambda x: x.symbol):
             if piece.log_freq == 0:
                 continue
-            next_state = 0
-
-            for char in piece.symbol[-1:0:-1]:
+            
+            while not piece.symbol.startswith(prefix2state[-1][0]):
+                prefix2state.pop()
+            state = prefix2state[-1][1]
+            for i in range(len(prefix2state[-1][0]), len(piece.symbol)-1):
+            # for char in piece.symbol[len(prefix2state[-1][0]):-1]:
+                char = piece.symbol[i]
                 new_state = sp_to_char.add_state()
-                sp_to_char.add_arc(new_state, fst.Arc(0, char_symb.find(char), log_one, next_state))
-                next_state = new_state
-            sp_to_char.add_arc(0, fst.Arc(
-                piece.index, char_symb.find(piece.symbol[0]), fst.Weight(sp_to_char.weight_type(), -piece.log_freq), next_state))
-        sp_to_char.minimize()
+                prefix2state.append((piece.symbol[:i+1], new_state))
+                sp_to_char.add_arc(state, fst.Arc(0, char_symb.find(char), log_one, new_state))
+                state = new_state
+            sp_to_char.add_arc(state, fst.Arc(
+                piece.index, char_symb.find(piece.symbol[-1]), fst.Weight(sp_to_char.weight_type(), -piece.log_freq), 0))
         return sp_to_char
 
     
