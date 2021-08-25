@@ -1,14 +1,14 @@
-import os
 import pathlib
 import random
+import sys
 from argparse import ArgumentParser
 
 import numpy as np
 import sentencepiece
 
-from simi.utils import ensure_path
 from simi.dataset import Data
 from simi.segmentation import train_sentencepiece
+from simi.utils import ensure_path
 
 
 def parseArgs():
@@ -34,8 +34,9 @@ def run(args):
     np.random.seed(args.seed)
     sentencepiece.set_random_generator_seed(args.seed)
     
-    assert not ensure_path(args.sentencepiece_prefix.with_suffix('.model')) or args.overwrite, \
-        f'Sentencepiece model found at {args.sentencepiece_prefix}. If you want to overwrite, rerun with --overwrite.'
+    if ensure_path(args.sentencepiece_prefix.with_suffix('.model')) and not args.overwrite:
+        print(f'Sentencepiece model found at {args.sentencepiece_prefix}, skipping training. If you want to overwrite, rerun with --overwrite.')
+        sys.exit(0)
         
     print('Loading trainset...')
     trainset = Data(args.trainset)
