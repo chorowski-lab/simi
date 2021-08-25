@@ -1,14 +1,14 @@
 import os
 import pathlib
 import random
-from argparse import ArgumentError, ArgumentParser
-import pickle
+import sys
+from argparse import ArgumentParser
 
 import numpy as np
 import sentencepiece
 
-from simi import utils, dataset
-from simi.segmentation import segment_sentencepiece, segment_viterbi, train_sentencepiece
+from simi import dataset, utils
+from simi.segmentation import segment_sentencepiece, segment_viterbi
 
 
 def parseArgs():
@@ -35,10 +35,9 @@ def parseArgs():
 
 
 def save_segmentation(formatted, dataset, path, args):
-    if not args.output_format or not args.output_format.split(','):
-        raise Exception(f'Output format should be a comma sparated list')
+    assert args.output_format and args.output_format.split(','), \
+        f'Output format should be a comma sparated list'
 
-    
     if 'txt' in args.output_format.split(','):
         with open(args.output / 'segmented_outputs.txt', 'w') as output:
             for sentence, fname in zip(formatted, dataset.filenames):
@@ -62,6 +61,10 @@ def run(args):
     
     if not os.path.exists(args.output):
         os.makedirs(args.output)
+
+    if 'txt' in args.output_format.split(',') and os.path.exists(args.output / 'segmented_outputs.txt'):
+        print(f'Segmentation already found at {args.output}, skipping')
+        sys.exit(0)
     
     assert utils.ensure_path(f'{args.sentencepiece_prefix}.model'), \
         f'Sentencepiece model not found at {args.sentencepiece_prefix}'
@@ -71,7 +74,7 @@ def run(args):
 
     if args.viterbi:
         print('Running Viterbi segmentation...')
-        assert args.clusterings is not None, "If viterbi is used you have to specify path to the clusterings"
+        assert args.clusterings is not None, "If viterbi is used you have to specify path to the clusterings!"
         devset.load_clusterings(args.clusterings, args.alpha)
 
         vit_formatted, vit_segmentation = segment_viterbi(devset.data, devset.clusterings, args.sentencepiece_prefix)
