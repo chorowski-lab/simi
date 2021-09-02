@@ -175,8 +175,8 @@ dependencies:
   - zstd=1.4.9=haebb681_0
   - pip:
     - antlr4-python3-runtime==4.8
-    - cpc-audio==1.0
-    - fairseq==1.0.0a0+19793a7
+    - "git+https://github.com/tuanh208/CPC_audio.git@zerospeech"
+    - "git+https://github.com/pytorch/fairseq.git"
     - hydra-core==1.0.6
     - importlib-resources==5.1.4
     - jiwer==2.2.0
@@ -188,4 +188,3 @@ dependencies:
     - sacrebleu==1.5.1
     - sentencepiece==0.1.95
     - zipp==3.4.1
-prefix: /pio/scratch/1/i290956/miniconda3/envs/semantic

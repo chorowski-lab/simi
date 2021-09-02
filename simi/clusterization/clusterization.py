@@ -8,6 +8,7 @@ def cluster_kmeans(data, weights, path, n_clusters, train=True, cosine=False):
 
     if cosine:
         length = np.sqrt((data**2).sum(axis=1))[:,None]
+        length[length <= 0] = 0.00000001 # sometimes these vectors might be zero and following line would crash
         data = data / length
 
     if not ensure_path(path):

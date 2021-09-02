@@ -14,22 +14,26 @@ from simi.segmentation import segment_sentencepiece, segment_viterbi, train_sent
 def parseArgs():
     parser = ArgumentParser()
 
-    parser.add_argument('trainset', type=pathlib.Path,
-                        help='Path to the quantized trainset for sentencepiece')
-    parser.add_argument('dataset', type=pathlib.Path,
-                        help='Path to the quantized dataset, which is to be segmented')
-    parser.add_argument('vocab_size', type=int,
-                        help='Sentencepiece\'s vocabulary size')
     parser.add_argument('output', type=pathlib.Path,
                         help='Output folder')
+    parser.add_argument('--dataset', type=pathlib.Path,
+                        help='Path to the quantized dataset, which is to be segmented')
+    parser.add_argument('--trainset', type=pathlib.Path,
+                        help='Path to the quantized trainset for sentencepiece learning. Necessary if --sentencepiece_prefix does not point to existing folder containing sentencepiece model & vocab.')
+    parser.add_argument('--vocab_size', type=int,
+                        help='Sentencepiece\'s vocabulary size. Necessary if --sentencepiece_prefix does not point to existing folder containing sentencepiece model & vocab.')
     parser.add_argument('--sentencepiece_prefix', type=pathlib.Path,
-                        help='Prefix for sentencepiece model, defaults to output+\'sentencepiece\'')
+                        help='Prefix for sentencepiece model, defaults to output+\'sentencepiece\'. In eval mode must point to existing folder containing sentencepiece model & vocab.')
     parser.add_argument('--clusterings', type=str,
                         help='Path to the clusterings of the data, must match the dataset. Required if using Viterbi segmentation')
     parser.add_argument('--seed', type=int, default=290956,
                         help='Random seed')
     parser.add_argument('--viterbi', action='store_true',
-                        help='Use Viterbi segmentation instead of sentencepiece\'s default')
+                        help='Do Viterbi segmentation instead of sentencepiece\'s default')
+    parser.add_argument('--eval', action='store_true',
+                        help='Run in eval only mode (do not train sentencepiece). If set, then arguments realted to sentencepiece training are ignored')
+    parser.add_argument('--train', action='store_true',
+                        help='Run in train only mode (do not segment dataset). If set, then arguments related to segmentation are ignored')
     parser.add_argument('--alpha', type=float, default=1.0, 
                         help='Temperature for sharpening/smoothening clustering distribution. More than 1: sharpening, less than 1: smoothening. Deafult: 1.0')
     parser.add_argument('--data_output_format', type=str, default='str',
@@ -87,6 +91,7 @@ def run(args):
         sp_prefix_path = args.sentencepiece_prefix
 
     if not utils.ensure_path(sp_prefix_path.with_suffix('.model')):
+        assert not args.eval, ""
         print('Loading trainset...')
         trainset = dataset.Data(args.trainset)
         train_sentencepiece(trainset.data, sp_prefix_path, args.vocab_size, max_piece_length=args.max_piece_length)
@@ -101,12 +106,13 @@ def run(args):
 
         vit_formatted, vit_segmentation = segment_viterbi(devset.data, devset.clusterings, sp_prefix_path)
         save_data(vit_formatted, devset, args)
-        save_segmentation(vit_segmentation, vit_formatted, devset, args.output / 'viterbi_segmentation', args)
+        save_segmentation(vit_segmentation, vit_formatted, devset, args.output, args)
 
-    print('Running SentencePiece segmentation...')
-    sp_formatted, sp_segmentation = segment_sentencepiece(devset.data, sp_prefix_path)
-    save_data(sp_formatted, devset, args)
-    save_segmentation(sp_segmentation, sp_formatted, devset, args.output / 'sentencepiece_segmentation', args)
+    else:
+        print('Running SentencePiece segmentation...')
+        sp_formatted, sp_segmentation = segment_sentencepiece(devset.data, sp_prefix_path)
+        save_data(sp_formatted, devset, args)
+        save_segmentation(sp_segmentation, sp_formatted, devset, args.output, args)
     
 
 if __name__ == "__main__":

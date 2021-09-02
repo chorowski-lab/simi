@@ -12,7 +12,7 @@ import torch
 from cpc.dataset import findAllSeqs
 from cpc.feature_loader import buildFeature_batch
 
-from simi.clusterization import loadClusterModule, loadCPCFeatureMaker, readArgs
+from simi.clusterization.utils_functions import loadClusterModule, loadCPCFeatureMaker, readArgs
 
 
 def parseArgs():

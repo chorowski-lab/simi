@@ -16,8 +16,13 @@ def sentpiece_viterbi(piece_logp):
     Output:
         best_lens: subsequent lengths of pieces on the most probable path
     """
-    max_piece_len = piece_logp.shape[0] - 1
+        
     T = piece_logp.shape[1]
+
+    if T < piece_logp.shape[0] - 1:
+        piece_logp = piece_logp[:T+1, :]
+        
+    max_piece_len = piece_logp.shape[0] - 1
 
     # Can start with a unit piece
     logp = np.ones((T,), dtype=np.float32) * -np.inf
