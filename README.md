@@ -37,6 +37,8 @@ It prints the number of pieces and max/min/mean piece counts.
 
 This is a script for running the CPC_kmeans checkpoint, but without the latest argmax (we leave each frame as distribution on centroids). This is required for the viterbi segmentation.
 
+It uses the `zerospeech2021_baseline` conda environment, unlike the other scripts. For installation please follow this chapter: [https://github.com/bootphon/zerospeech2021_baseline#installation](https://github.com/bootphon/zerospeech2021_baseline#installation)
+
 To get the description of parameters run: `python clusterization.py --help`.
 ## Segmentation
 
