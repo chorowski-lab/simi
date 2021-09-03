@@ -21,6 +21,9 @@ def extract_pieces(sp):
 class SentencePieceTrainer:
     def __init__(self, INITIAL_PIECES):
         self._init_symbols(INITIAL_PIECES)
+        self._unk_penalty = 10
+        self._reproduce_unk_bug = True
+        # self._reproduce_counting_bug = True
         
     def _init_symbols(self, INITIAL_PIECES):
         # Create symbol tables for FSTs, these can stay constant through training
@@ -37,6 +40,7 @@ class SentencePieceTrainer:
         PIECE_SYMB.add_symbol('<eps>')
         for piece in INITIAL_PIECES[1:]:
             PIECE_SYMB.add_pair(piece.symbol, piece.index)
+        PIECE_SYMB.add_symbol('<unk>')
         
         self.CHAR_SYMB = CHAR_SYMB
         self.PIECE_SYMB = PIECE_SYMB
@@ -61,6 +65,11 @@ class SentencePieceTrainer:
             piece_symb = self.PIECE_SYMB
         if char_symb is None:
             char_symb = self.CHAR_SYMB
+        
+        required_pieces = {
+            char_symb.find_symbol(i) for i in range(1, char_symb.num_symbols())
+        }
+        
         sp_to_char = self.arc_type_to_fst[arc_type]()
         Weight = self.arc_type_to_weigth[arc_type]
         Arc = self.arc_type_to_arc[arc_type]
@@ -75,6 +84,9 @@ class SentencePieceTrainer:
         for piece in sorted(pieces, key=lambda x: x.symbol):
             if piece.log_freq == 0:
                 continue
+            assert piece.symbol == piece_symb.find_symbol(piece.index)
+            
+            required_pieces.discard(piece.symbol)
             
             while not piece.symbol.startswith(prefix2state[-1][0]):
                 prefix2state.pop()
@@ -88,6 +100,16 @@ class SentencePieceTrainer:
                 state = new_state
             sp_to_char.add_arc(state, Arc(
                 char_symb.find_index(piece.symbol[-1]), piece.index, Weight(-piece.log_freq), 0))
+        
+        unk_penalty = min(pieces, key=lambda x:x.log_freq).log_freq - self._unk_penalty
+        if self._reproduce_unk_bug:
+            unk_id = min(pieces, key=lambda x:x.index).index
+        else:
+            unk_id = piece_symb.find_index('<unk>')
+        
+        for symbol in required_pieces:
+            sp_to_char.add_arc(0, Arc(
+                char_symb.find_index(symbol), unk_id, Weight(-unk_penalty), 0))
         return sp_to_char
     
     # Kaldi decoder based helper methods
@@ -137,15 +159,20 @@ class SentencePieceTrainer:
         alphas = [w.value for w in fst.shortestdistance(lattice)]
         betas = [w.value for w in fst.shortestdistance(lattice, reverse=True)]
         Z = betas[lattice.start()]  # The cost of reaching the entry node from all terminals - tot cost of the lattice
-        counts = defaultdict(float)
+        counts = {}
         for state in range(lattice.num_states()):
             for arc in lattice.arcs(state):
                 if arc.olabel == 0:
                     # skip epsilon arcs
                     continue
                 # prob(reach_state)*prob(exit_from_nextstate)*prob(sumbol_unigram) / sum_allpaths(prob(path))
-                count = np.exp(Z - (alphas[state] + betas[arc.nextstate] + arc.weight.value))
-                counts[arc.olabel] += count
+                log_count = Z - (alphas[state] + betas[arc.nextstate] + arc.weight.value)
+                if arc.olabel not in counts:
+                    counts[arc.olabel] = log_count
+                else:
+                    counts[arc.olabel] = np.logaddexp(counts[arc.olabel], log_count)
+        for k in counts:
+            counts[k] = np.exp(counts[k])
         return PieceCounts(Z, counts)
 
     def viterbi(self, sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepend_space=True, unigram_weight=1.0):
@@ -221,15 +248,20 @@ class SentencePieceTrainer:
         alphas = [w.value for w in fst.shortestdistance(lattice)]
         betas = [w.value for w in fst.shortestdistance(lattice, reverse=True)]
         Z = betas[lattice.start()]  # The cost of reaching the entry node from all terminals - tot cost of the lattice
-        counts = defaultdict(float)
+        counts = {}
         for state in range(lattice.num_states()):
             for arc in lattice.arcs(state):
                 if arc.olabel == 0:
                     # skip epsilon arcs
                     continue
                 # prob(reach_state)*prob(exit_from_nextstate)*prob(sumbol_unigram) / sum_allpaths(prob(path))
-                count = np.exp(Z - (alphas[state] + betas[arc.nextstate] + arc.weight.value))
-                counts[arc.olabel] += count
+                log_count = Z - (alphas[state] + betas[arc.nextstate] + arc.weight.value)
+                if arc.olabel not in counts:
+                    counts[arc.olabel] = log_count
+                else:
+                    counts[arc.olabel] = np.logaddexp(counts[arc.olabel], log_count)
+        for k in counts:
+            counts[k] = np.exp(counts[k])
         return PieceCounts(Z, counts)
 
     def viterbi_naive(self, sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepend_space=True):
@@ -279,6 +311,7 @@ class SentencePieceTrainer:
             objective += counts.Z * sent_count
             n_sentences += sent_count
             # TODO: bug, should incorporate sent_count. This bug seems to be in C++ code too
+            # please check self._reproduce_counting_bug
             n_tokens += len(self.viterbi(sentence, sp_to_char_std)[0][0])
             for symbol, count in counts.counts.items():
                 total_counts[symbol] += count * sent_count
@@ -291,9 +324,10 @@ class SentencePieceTrainer:
         for piece in pieces:
             count = counts[piece.index]
 
-            if len(piece.symbol) == 1:
-                new_pieces.append(SentencePiece(piece.index, piece.symbol, count))
-                continue
+#             if len(piece.symbol) == 1:
+#                 new_pieces.append(SentencePiece(piece.index, piece.symbol, count))
+#                 sum_counts += count
+#                 continue
 
             if count < kExpectedFrequencyThreshold:
                 continue
@@ -301,7 +335,7 @@ class SentencePieceTrainer:
             sum_counts += count
 
         log_sum = digamma(sum_counts)
-        new_pieces = [SentencePiece(piece.index, piece.symbol, digamma(piece.log_freq) - log_sum if np.isfinite(digamma(piece.log_freq) - log_sum) else 0.0) for piece in new_pieces]
+        new_pieces = [SentencePiece(piece.index, piece.symbol, digamma(piece.log_freq) - log_sum if np.isfinite(digamma(piece.log_freq) - log_sum) else -1e3) for piece in new_pieces]
         return new_pieces
 
     def prune_pieces(self, pieces, sentences, desired_size, prune_frac):
