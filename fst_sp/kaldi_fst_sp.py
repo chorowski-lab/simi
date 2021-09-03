@@ -10,7 +10,7 @@ from kaldi import matrix, decoder
 Sentence = namedtuple('Sentence', ['text', 'count'])
 SentencePiece = namedtuple('SentencePiece', ['index', 'symbol', 'log_freq'])
 PieceCounts = namedtuple('PieceCounts', ['Z', 'counts'])
-ViterbiPath = namedtuple('ViterbiPath', ['path', 'prob'])
+ViterbiPath = namedtuple('ViterbiPath', ['path', 'prob', 'log_prob'])
 EStepRet = namedtuple('EStepRet', ['objective', 'n_tokens', 'counts'])
 
 def extract_pieces(sp):
@@ -192,7 +192,8 @@ class SentencePieceTrainer:
         def dump_best_path(state, prefix, log_prob):
             ret = []
             if nbest.final(state) != weight_zero:
-                ret = [ViterbiPath(list(prefix), np.exp(Z -log_prob -wcfun(nbest.final(state))))]
+                final_log_prob = Z -log_prob -wcfun(nbest.final(state))
+                ret = [ViterbiPath(list(prefix), np.exp(final_log_prob), final_log_prob)]
 
             if nbest.num_arcs(state) == 1:
                 arc, = nbest.arcs(state)
@@ -278,7 +279,8 @@ class SentencePieceTrainer:
         def dump_best_path(state, prefix, log_prob):
             ret = []
             if nbest.final(state) != weight_zero:
-                ret = [ViterbiPath(list(prefix), np.exp(Z -log_prob -nbest.final(state).value))]
+                final_log_prob = Z -log_prob -nbest.final(state).value
+                ret = [ViterbiPath(list(prefix), np.exp(final_log_prob), final_log_prob)]
 
             if nbest.num_arcs(state) == 1:
                 arc, = nbest.arcs(state)
@@ -346,13 +348,16 @@ class SentencePieceTrainer:
         for piece in pieces:
             nbest = self.viterbi_naive(piece.symbol, sp_to_char, nshortest=2, normalize_probs=False, prepend_space=False)
             if len(nbest) == 1:
+#                 print(f'PP {piece.symbol} always keep true FS {nbest[0].log_prob}')
                 always_keep[piece.index] = True
                 continue
             if len(nbest[0].path) > 1:
                 # The best tokenization for this piece is not itself!
+#                 print(f'PP {piece.symbol} always keep false FS {nbest[0].log_prob}/{nbest[1].log_prob}')
                 always_keep[piece.index] = False
                 continue
             always_keep[piece.index] = True
+#             print(f'PP {piece.symbol} always keep true FS {nbest[0].log_prob}/{nbest[1].log_prob} alternatives {[self.PIECE_SYMB.find_symbol(pi) for pi in nbest[1].path]}')
             alternatives[piece.index] = nbest[1].path
 
         inverted = defaultdict(list)
@@ -374,9 +379,11 @@ class SentencePieceTrainer:
             p_id = piece.index
             if not alternatives.get(p_id):
                 new_pieces.append(piece)
+#                 print(f'{p_id}/{piece.symbol} accepted for lack of alternatives')
                 continue
 
             if piece_usage_counts[p_id] == 0 and not always_keep[p_id]:
+#                 print(f'{p_id}/{piece.symbol} discarded')
                 continue
 
             F = sum(sentences[sent].count for sent in inverted[p_id]) / v_sums  # TODO: add sentence weigths
@@ -392,8 +399,9 @@ class SentencePieceTrainer:
             for alt_piece_id in alternatives[p_id]:
                 logprob_alt += np.log(piece_usage_counts[alt_piece_id] + piece_usage_counts[p_id]) - logsum_alt
             loss = F * (logprob_sp - logprob_alt)
+#             print(f'{p_id}/{piece.symbol} loss {loss}')
 
-            candidates.append((loss, piece))
+            candidates.append((-loss, piece))
 
         pruned_size = max(desired_size, int(len(pieces) * prune_frac))
         new_pieces.extend([piece for _, piece in sorted(candidates)[:pruned_size - len(new_pieces)]])
