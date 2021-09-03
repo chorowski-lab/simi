@@ -1,9 +1,11 @@
+from collections import Counter
+
 import numpy as np
 
 
 class ESA:
 
-    def fit(self, corpus, delimiter='$', max_piece_len=None):
+    def fit(self, corpus, delimiter='$', max_piece_len=10**6):
         """
         Args
         ----
@@ -11,33 +13,43 @@ class ESA:
 
         """
 
-        if max_piece_len is not None:
-            # XXX
-            raise NotImplementedError
+        # if max_piece_len is not None:
+        #     # XXX
+        #     raise NotImplementedError
 
         self.trie = None  # Invalidate old trie
 
         self.corpus = corpus
         # n = sum(len(txt) for txt in corpus)
-        n = len(corpus)
+        n = sum(len(s) for s in corpus)
         self.n = n
 
-        self.suf = np.asarray(sorted(range(n), key=lambda idx: corpus[idx:]))
+        self.suf_counts = Counter()
+        for s in corpus:
+            self.suf_counts.update([s[idx:idx+max_piece_len] for idx in range(len(s))])
+
+        self.suf = sorted(self.suf_counts.keys())
+
+        n = len(self.suf)
+        self.n = n
+
+        # self.suf = np.asarray(sorted(range(n), key=lambda idx: corpus[idx:]))
 
         print()
         print('Suffix array')
         print('------------')
         print('  ', self.suf)
-        for s in self.suf:
-            print('  ', corpus[s:])
+
+        for suf in self.suf:
+            print('  ', suf)
         print()
 
-        self.lcp = np.zeros((n + 1,), dtype=np.int32)
+        self.lcp = np.zeros((n,), dtype=np.int32)
 
         for i in range(1, n):
             x = self.suf[i - 1]
             y = self.suf[i]
-            for a, b in zip(corpus[x:], corpus[y:]):
+            for a, b in zip(x, y):
                 if a != b or a == delimiter or b == delimiter:
                     break
                 self.lcp[i] += 1
@@ -60,13 +72,14 @@ class ESA:
 
         def prepare(tupl):
             lcp, l, r = tupl
-            piece = self.corpus[ self.suf[l]:self.suf[l]+lcp ]
-            coverage = (r - l + 1) * len(piece)
+            piece = self.suf[l][:lcp]
+            coverage = sum(self.suf_counts[self.suf[i]] for i in range(l, r + 1)) * len(piece)
+            # coverage = (r - l + 1) * len(piece)
             return piece, coverage
 
         # bottom-up traversal
         stack = [[0, 0, None]]
-        for i in range(0, n + 1):
+        for i in range(0, n):  # XXX n + 1 ?
             l = i - 1
             while self.lcp[i] < stack[-1][LCP]:
                 stack[-1][R] = i - 1
@@ -74,9 +87,10 @@ class ESA:
                 # report(interval)
                 yield prepare(interval)
                 l = interval[L]
+
             if self.lcp[i] > stack[-1][LCP]:
                 stack.append([self.lcp[i], l, None])
-        stack[-1][R] = n
+        stack[-1][R] = n - 1  # XXX n ?
         interval = stack.pop()
         # report(interval)
 
