@@ -290,13 +290,18 @@ class SentencePieceTrainer:
         sum_counts = 0
         for piece in pieces:
             count = counts[piece.index]
+
+            if len(piece.symbol) == 1:
+                new_pieces.append(SentencePiece(piece.index, piece.symbol, count))
+                continue
+
             if count < kExpectedFrequencyThreshold:
                 continue
             new_pieces.append(SentencePiece(piece.index, piece.symbol, count))
             sum_counts += count
 
         log_sum = digamma(sum_counts)
-        new_pieces = [SentencePiece(piece.index, piece.symbol, digamma(piece.log_freq) - log_sum) for piece in new_pieces]
+        new_pieces = [SentencePiece(piece.index, piece.symbol, digamma(piece.log_freq) - log_sum if np.isfinite(digamma(piece.log_freq) - log_sum) else 0.0) for piece in new_pieces]
         return new_pieces
 
     def prune_pieces(self, pieces, sentences, desired_size, prune_frac):
@@ -305,7 +310,7 @@ class SentencePieceTrainer:
         always_keep = {}
         alternatives = {}
         for piece in pieces:
-            nbest = self.viterbi(piece.symbol, sp_to_char, nshortest=2, normalize_probs=False, prepend_space=False)
+            nbest = self.viterbi_naive(piece.symbol, sp_to_char, nshortest=2, normalize_probs=False, prepend_space=False)
             if len(nbest) == 1:
                 always_keep[piece.index] = True
                 continue
@@ -333,10 +338,11 @@ class SentencePieceTrainer:
         candidates = []
         for piece in pieces:
             p_id = piece.index
-            if piece_usage_counts[p_id] == 0 and not always_keep[p_id]:
-                continue
             if not alternatives.get(p_id):
                 new_pieces.append(piece)
+                continue
+
+            if piece_usage_counts[p_id] == 0 and not always_keep[p_id]:
                 continue
 
             F = sum(sentences[sent].count for sent in inverted[p_id]) / v_sums  # TODO: add sentence weigths
