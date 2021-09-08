@@ -42,20 +42,19 @@ class SuffixTree:
         sub2 = self.nodes[n2].sub
         assert(sub2[0]==suf[0])
 
-        try:
-            # find prefix of remaining suffix in common with child
-            j = 0
-            while j < len(sub2):
-                if suf[j] != sub2[j]:
-                    # split n2
-                    n3 = n2
-                    # new node for the part in common
-                    n2 = len(self.nodes)
-                    self.nodes.append(Node(sub2[:j], [n3]))
-                    self.nodes[n3].sub = sub2[j:] # old node loses the part in common
-                    self.nodes[n].ch[child_of_n] = n2
-                    break # continue down the tree
-                j = j + 1
+        # find prefix of remaining suffix in common with child
+        j = 0
+        while j < len(sub2):
+            if suf[j] != sub2[j]:
+                # split n2
+                n3 = n2
+                # new node for the part in common
+                n2 = len(self.nodes)
+                self.nodes.append(Node(sub2[:j], [n3]))
+                self.nodes[n3].sub = sub2[j:] # old node loses the part in common
+                self.nodes[n].ch[child_of_n] = n2
+                break # continue down the tree
+            j = j + 1
 
         self.addSuffix(suf[j:],n2)
  
