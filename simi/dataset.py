@@ -1,8 +1,8 @@
 import os
 from progressbar import ProgressBar
 from env import TRANSCRIPTIONS_DIR, ROOTPATH
-from .utils import get_spaces_pos
-from .segmentation import LibriSpeechSegmentation
+from simi.utils import get_spaces_pos
+from simi.segmentation import LibriSpeechSegmentation
 import numpy as np
 from progressbar import ProgressBar
 

@@ -2,12 +2,11 @@ from collections import Counter
 
 import numpy as np
 
-debug=True
 
 class ESA:
     """ Enhanced suffix array """
 
-    def fit(self, corpus, delimiter='$', max_piece_len=10**6):
+    def fit(self, corpus, delimiter='$', max_piece_len=10**6, debug = False):
         """
         Args
         ----
