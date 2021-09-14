@@ -4,8 +4,9 @@ import numpy as np
 
 
 class ESA:
+    """ Enhanced suffix array """
 
-    def fit(self, corpus, delimiter='$', max_piece_len=10**6):
+    def fit(self, corpus, delimiter='$', max_piece_len=10**6, debug = False):
         """
         Args
         ----
@@ -20,9 +21,6 @@ class ESA:
         self.trie = None  # Invalidate old trie
 
         self.corpus = corpus
-        # n = sum(len(txt) for txt in corpus)
-        n = sum(len(s) for s in corpus)
-        self.n = n
 
         self.suf_counts = Counter()
         for s in corpus:
@@ -31,18 +29,9 @@ class ESA:
         self.suf = sorted(self.suf_counts.keys())
 
         n = len(self.suf)
-        self.n = n
+        self.n = n # the size of suffix array
 
         # self.suf = np.asarray(sorted(range(n), key=lambda idx: corpus[idx:]))
-
-        print()
-        print('Suffix array')
-        print('------------')
-        print('  ', self.suf)
-
-        for suf in self.suf:
-            print('  ', suf)
-        print()
 
         self.lcp = np.zeros((n,), dtype=np.int32)
 
@@ -54,11 +43,21 @@ class ESA:
                     break
                 self.lcp[i] += 1
 
-        print()
-        print('LCP Table')
-        print('---------')
-        print('  ', self.lcp)
-        print()
+        if debug:
+            print()
+            print('Suffix array')
+            print('------------')
+            #print('  ', self.suf)
+
+            for suf in self.suf:
+                print('  ', suf)
+            print()
+
+            print()
+            print('LCP Table')
+            print('---------')
+            print('  ', self.lcp)
+            print()
 
     def pieces(self):
 
@@ -68,7 +67,7 @@ class ESA:
 
         def report(tupl):
             lcp, l, r = tupl
-            print(corpus[self.suf[l]:self.suf[l]+int(lcp)], '#\t', tupl)
+            print(self.corpus[self.suf[l]:self.suf[l]+int(lcp)], '#\t', tupl)
 
         def prepare(tupl):
             lcp, l, r = tupl
@@ -90,6 +89,9 @@ class ESA:
 
             if self.lcp[i] > stack[-1][LCP]:
                 stack.append([self.lcp[i], l, None])
+
+        # Failed when stack has more than one element at the end
+        # TODO proposition: add some special symbol to end of SA and lcp array such that everything would be done in loop above
         stack[-1][R] = n - 1  # XXX n ?
         interval = stack.pop()
         # report(interval)
@@ -149,8 +151,9 @@ class ESA:
 
 if __name__ == '__main__':
     esa = ESA()
-    s = 'acaaacatat'
-    s = 'acaaacatatdd#dddatat'
+    s = ['acaaacatatdd#dddatat$']
+    s = ['cbaacbaacbaacbaaa'] #fails for finding prefix cbaa
+
     print()
     print(s)
     print()
@@ -158,19 +161,13 @@ if __name__ == '__main__':
     for p, c in esa.pieces():
         print(p, c)
 
-    esa.build_trie()
-
-    print()
-    t = 'acatcattattacaacat'
-    print(t)
-    print()
+    import sys
+    sys.exit(0)
 
     for i in range(len(t)):
         for p in esa.prefixes(t[i:]):
             print(f'{" "*i}{p}')
 
-    import sys
-    sys.exit(0)
 
     # esa.fit('Ala ma kota')
     for q in ['ac', 'at', 'aa', 't', 'ta', 'a', 'h']:
