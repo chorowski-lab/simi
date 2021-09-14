@@ -20,8 +20,18 @@ from fst_sp.esa import ESA
 
 import fst_sp.kaldi_fst_sp as fst
 import numpy as np
+from scipy.special import logsumexp,digamma
 
 #import sentencepiece as spm
+
+#default values for testing and development purposes to simple run without args. Args has highest priority(over argparse defaults and arguments)
+dev_default_options = { 
+    "vocab_size": 100,
+    "delimiter": "$",
+    "trainset": "simi/fst_sp/botchan_small.txt",
+    "max_piece_length": 5,
+    'num_sub_iterations': 2
+}
 
 print_ = lambda x: None #do nothing if verbose not active
 
@@ -138,8 +148,10 @@ def run(args):
                     seed_vocab_size = args.seed_sentencepiece_size, 
                     max_piece_length = args.max_piece_length,
                     debug=debug)
-    #for a,b in seed_sp:
-    #    print(a,b)
+
+    seed_sp.insert(0,("<unk>",0)) #workaraound of bug TODO?
+    seed_sp.insert(1,("<s>",0)) #workaraound of bug TODO?
+    seed_sp.insert(2,("</s>",0)) #workaraound of bug TODO?
 
 
     #Sentencepiece training
@@ -166,7 +178,8 @@ def run(args):
         if len(pieces) <= DESIRED_PIECES:
             break
             
-    print(pieces)
+    for ind,symbol,log_freq in pieces:
+        print(ind,symbol,log_freq)
     # TODO: add finalization
 
     #print('Loading devset...')
@@ -203,7 +216,11 @@ def make_seed_sentence_pieces(sentences, seed_vocab_size, max_piece_length, debu
     esa = ESA()
     esa.fit(sentences, delimiter=delimiter, max_piece_len=max_piece_length, debug = debug)
 
-    seed_sentp = sorted(esa.pieces(), key=lambda p_score: -p_score[1])
+    seed_sentp = sorted(esa.pieces(), key=lambda p_score: -p_score[1]) 
+    #TODO: bug(?) - single letters (all?) are added by esa, temporary workaround:
+    seed_sentp = [x for x in seed_sentp if len(x[0])>1]
+    # end of workaround
+        
 
     # Prune
     seed_sentp = seed_sentp[:seed_vocab_size]
@@ -217,13 +234,15 @@ def make_seed_sentence_pieces(sentences, seed_vocab_size, max_piece_length, debu
     for c, cnt in all_chars.items():
         seed_sentp.append((c, cnt))  # 0.5)) # XXX XXX XXX
 
+
     seed_sentp = to_log_prob(seed_sentp)
-    seed_sentp = sorted(esa.pieces(), key=lambda p_score: -p_score[1])
+    seed_sentp = sorted(seed_sentp, key=lambda p_score: -p_score[1])
 
     print(f"Initialized {len(seed_sentp)} seed sentencepieces")
-
     return seed_sentp
     
 if __name__=="__main__":
     args = parseArgs()
+    for k,v in dev_default_options.items():
+        setattr(args,k,v)
     run(args)
