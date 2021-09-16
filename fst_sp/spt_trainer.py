@@ -1,6 +1,9 @@
-from simi.fst_sp.kaldi_fst_sp import Sentence
-from spt_model import *
-from utils import *
+from typing import Optional
+from collections import Counter
+from spt_model import SentencePieceModel
+from utils import Sentence,SentencePiece,PieceCounts,ViterbiPath,EStepRet
+from esa import ESA
+import numpy as np
 
 
 class SentencePieceTrainerParameters(object):
@@ -9,7 +12,8 @@ class SentencePieceTrainerParameters(object):
         "vocab_size": 90,
         "max_piece_length": 1000,
         'num_sub_iterations': 2, #EM subiterations
-        'verbose': True, #more information printed
+        'seed_vocab_size': 10000000,
+        'verbose': False, #more information printed
         }
 
     def __init__(self,parameters=None):
@@ -20,17 +24,63 @@ class SentencePieceTrainerParameters(object):
         self.max_piece_length   = SentencePieceTrainerParameters.defaults["max_piece_length"]
         self.num_sub_iterations = SentencePieceTrainerParameters.defaults["num_sub_iterations"]
         self.verbose            = SentencePieceTrainerParameters.defaults["verbose"]
+        self.seed_vocab_size    = SentencePieceTrainerParameters.defaults["seed_vocab_size"]
 
 
 
 class SentencePieceTrainer(object):
 
-    def __init__(self, parameters:SentencePieceTrainerParameters = None):
+    def __init__(self, parameters:Optional[SentencePieceTrainerParameters] = None):
 
-        if self.parameters:
+        if parameters:
             self.parameters = parameters
         else:
             self.parameters = SentencePieceTrainerParameters() # get defaults
+
+    @staticmethod
+    def get_seed_pieces(sentences, seed_vocab_size, max_piece_length, debug=False):
+        def to_log_prob(pieces):
+            Z = np.log(sum(score for p, score in pieces))
+            pieces = [(p, np.log(score) - Z) for p, score in pieces]
+            return pieces
+        print("Extracting frequent sub strings...")
+
+        # Makes an enhanced suffix array to extract all sub strings occurring
+        # more than 2 times in the sentence.
+        
+        delimiter=u'\u25C6'
+
+        esa = ESA()
+        esa.fit([], delimiter=delimiter, max_piece_len=max_piece_length, debug = debug)
+
+        seed_sentp = sorted(esa.pieces(), key=lambda p_score: -p_score[1]) 
+
+        #TODO: bug(?) - single letters (all?) are added by esa, temporary workaround:
+        seed_sentp = [x for x in seed_sentp if len(x[0])>1]
+            
+        # Prune
+        seed_sentp = seed_sentp[:seed_vocab_size]
+
+        # all_chars must be included in the seed sentencepieces.
+        all_chars = Counter()
+        for s in sentences:
+            all_chars.update(s)
+        del all_chars[delimiter]
+
+        for c, cnt in all_chars.items():
+            seed_sentp.append((c, cnt))  # 0.5)) # XXX XXX XXX
+
+
+        seed_sentp = to_log_prob(seed_sentp)
+        seed_sentp = sorted(seed_sentp, key=lambda p_score: -p_score[1])
+        seed_sentp.insert(0,("<unk>",0))
+        seed_sentp.insert(1,("<s>",0))
+        seed_sentp.insert(2,("</s>",0)) 
+
+        #print(" ".join(s for s,c in seed_sentp[:50]))
+
+        print(f"Initialized {len(seed_sentp)} seed sentencepieces")
+        return [SentencePiece(ind,symb,freq) for ind,(symb,freq) in enumerate(seed_sentp)]
 
 
     # I changed the way it works - instead of handling model saving, it simply returns it.
@@ -47,25 +97,21 @@ class SentencePieceTrainer(object):
         if all(t == str for t in types):
             sentences = [Sentence( (" " + s.strip()).replace(" ","▁"), 1) for s in sentences] #_This_format_of_sequence
         elif all(t == Sentence for t in types):
-            sentences = [Sentence( (" " + s.strip()).replace(" ","▁"), c) for Sentence( s,c ) in sentences] #_This_format_of_sequence
+            sentences = [Sentence( (" " + s.strip()).replace(" ","▁"), c) for ( s,c ) in sentences] #_This_format_of_sequence
         else:
             raise NotImplementedError()
 
 
 
-        seed_sp = make_seed_sentence_pieces([s for Sentence(s,c) in sentences], #In esa
-                        seed_vocab_size = self.parameters.seed_sentencepiece_size, 
+        seed_sp = SentencePieceTrainer.get_seed_pieces(sentences, #In esa
+                        seed_vocab_size = self.parameters.seed_vocab_size, 
                         max_piece_length = self.parameters.max_piece_length,
                         debug = self.parameters.verbose)
 
-        seed_sp.insert(0,("<unk>",0))
-        seed_sp.insert(1,("<s>",0))
-        seed_sp.insert(2,("</s>",0)) 
-
 
         #Sentencepiece training
-        pieces = [fst.SentencePiece(ind,symb,log_freq) for ind,(symb,log_freq) in enumerate(seed_sp)] #in kaldi_fst_sp
-        T=fst.SentencePieceTrainer(pieces)
+        pieces = seed_sp 
+        T=fst.SentencePieceTrainer(pieces) #in kaldi_fst_sp
         sentences = [fst.Sentence(text, 1) for text in sentences]
 
         vocab_size = self.parameters.vocab_size

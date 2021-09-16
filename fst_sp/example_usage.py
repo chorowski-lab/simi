@@ -1,4 +1,4 @@
-from fst_sp import SentencePieceModel, SentencePieceTrainer
+from spt_trainer import SentencePieceTrainer,SentencePieceModel
 
 
 # EXAMPLE 1
@@ -6,7 +6,8 @@ from fst_sp import SentencePieceModel, SentencePieceTrainer
 # list of strings
 string_data = list(line.strip() for line in open('./botchan.txt', 'r', encoding='utf8'))
 # train model
-model = SentencePieceTrainer.train(string_data)
+trainer = SentencePieceTrainer()
+model = trainer.train(string_data)
 # example sentence (string)
 sentence = 'I saw a girl with a telescope.'
 # segmenting the sentence
@@ -20,7 +21,8 @@ encoding = model.encode(sentence)
 # list of lists of ints
 int_data = list(map(lambda s: list(map(ord, s)), string_data))
 # train model
-model = SentencePieceTrainer.train(int_data)
+trainer = SentencePieceTrainer()
+model = trainer.train(int_data)
 # example sentence (list of ints)
 sentence = list(map(ord, 'I saw a girl with a telescope.'))
 # segmenting the sentence
