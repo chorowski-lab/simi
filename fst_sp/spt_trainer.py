@@ -2,11 +2,11 @@ from collections import Counter, defaultdict
 
 import kaldi.fstext as fst
 import numpy as np
-from kaldi import decoder, matrix
 from scipy.special import digamma, logsumexp
 
 from esa import ESA
 from spt_model import SentencePieceModel
+import fst_tools
 from utils import EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath
 
 
@@ -63,13 +63,14 @@ class SentencePieceTrainer(object):
             all_chars.update(s)
         del all_chars[delimiter]
 
+        print(f"Added {len(all_chars)} characters to seed vocabulary")
         for c, cnt in all_chars.items():
             seed_sentp.append((c, cnt))  # 0.5)) # XXX XXX XXX
 
         seed_sentp = to_log_prob(seed_sentp)
         seed_sentp = sorted(seed_sentp, key=lambda p_score: -p_score[1])
         seed_sentp.insert(0, ("<unk>", 0))
-        seed_sentp.insert(1, ("<s>", 0))
+        seed_sentp.insert(1, ("<s>", 0)) #unused so far
         seed_sentp.insert(2, ("</s>", 0))
 
         print(f"Initialized {len(seed_sentp)} seed sentencepieces")
@@ -120,9 +121,15 @@ class SentencePieceTrainer(object):
                 break
 
         pieces = sorted(pieces, key=lambda x: -x.log_freq)
+        pieces.insert(0, SentencePiece(0,"<unk>", 0))
+        pieces.insert(1, SentencePiece(0,"<s>", 0)) #unused so far
+        pieces.insert(2, SentencePiece(0,"</s>", 0))
+        pieces = [ SentencePiece(i, sentence, log_freq) for i,(_,sentence,log_freq) in enumerate(pieces)]
 
-        return pieces
-        #return SentencePieceModel(pieces=pieces)
+        T2 = SentencePieceTrainer(pieces)
+        sp_to_char = T2.get_sp_to_char(pieces,'standard')
+
+        return SentencePieceModel(model=sp_to_char, vocab=pieces)
 
     def __init__(self, INITIAL_PIECES):
         self._init_symbols(INITIAL_PIECES)
@@ -190,6 +197,8 @@ class SentencePieceTrainer(object):
         for piece in sorted(pieces, key=lambda x: x.symbol):
             if piece.log_freq == 0:
                 continue
+            if not piece.symbol == piece_symb.find_symbol(piece.index):
+                print(piece.symbol , piece_symb.find_symbol(piece.index))
             assert piece.symbol == piece_symb.find_symbol(piece.index)
 
             required_pieces.discard(piece.symbol)
@@ -222,51 +231,12 @@ class SentencePieceTrainer(object):
 
     # Kaldi decoder based helper methods
 
-    def text_to_matrix(self, text, char_symb=None, prepend_space=True):
-        if char_symb is None:
-            char_symb = self.CHAR_SYMB
-        if prepend_space:
-            text = ' ' + text
-        out_np = np.empty((len(text), char_symb.num_symbols()-1))
-        out_np.fill(-1e10)
-
-        for i, c in enumerate(text):
-            # handle weird SP spacer
-            if c == ' ':
-                c = '▁'
-            c = char_symb.find_index(c)
-            out_np[i, c - 1] = 0
-        return matrix.Matrix(out_np)
-
-    def get_lattice(self, sentence_text, sp_to_char, prepend_space=True):
-        opts = decoder.LatticeFasterDecoderOptions()
-        dec = decoder.LatticeFasterDecoder(sp_to_char, opts)
-        sentence_mat = self.text_to_matrix(
-            sentence_text, char_symb=sp_to_char.input_symbols(), prepend_space=prepend_space)
-        dec.decode(decoder.DecodableMatrixScaled(sentence_mat, 1.0))
-        lattice = dec.get_raw_lattice()
-        lattice.set_input_symbols(sp_to_char.input_symbols())
-        lattice.set_output_symbols(sp_to_char.output_symbols())
-        return lattice
-
-    def _to_log_lattice(self, lattice, cfun=lambda x: x.value):
-        lattice_log = fst.LogVectorFst()
-        for i in range(lattice.num_states()):
-            assert lattice_log.add_state() == i
-            lattice_log.set_final(i, fst.LogWeight(cfun(lattice.final(i))))
-        lattice_log.set_start(lattice.start())
-        for i in range(lattice.num_states()):
-            for a in lattice.arcs(i):
-                lattice_log.add_arc(i, fst.LogArc(
-                    a.ilabel, a.olabel, fst.LogWeight(cfun(a.weight)), a.nextstate, ))
-        return lattice_log
-
     def compute_piece_counts(self, sentence_text, sp_to_char, prepend_space=True, unigram_weight=1.0):
-        lattice_kaldi = self.get_lattice(
+        lattice_kaldi = fst_tools.get_lattice(
             sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
         # Convert the lattice to log semiring
         # The LatticeWeigth behaves like <Tropical, Tropical> and while it will be faster, the counts will be more approximate
-        lattice = self._to_log_lattice(
+        lattice = fst_tools._to_log_lattice(
             lattice_kaldi, lambda w: unigram_weight * w.value1 + w.value2)
         alphas = [w.value for w in fst.shortestdistance(lattice)]
         betas = [w.value for w in fst.shortestdistance(lattice, reverse=True)]
@@ -290,139 +260,6 @@ class SentencePieceTrainer(object):
             counts[k] = np.exp(counts[k])
         return PieceCounts(Z, counts)
 
-    def viterbi(self, sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepend_space=True, unigram_weight=1.0):
-        def wcfun(w):
-            return unigram_weight * w.value1 + w.value2
-        lattice_kaldi = self.get_lattice(
-            sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
-        if normalize_probs:
-            lattice_log = self._to_log_lattice(lattice_kaldi, wcfun)
-            Z = fst.shortestdistance(lattice_log, reverse=True)[
-                lattice_log.start()].value
-        else:
-            Z = 0.0  # speed hack
-        # we will need to do another arc-map here :(
-        assert unigram_weight == 1.0
-        nbest = fst.shortestpath(lattice_kaldi, nshortest=nshortest)
-        # shortestpath fails anyway for Log FST
-        weight_zero = fst.LatticeWeight.zero()
-
-        def dump_best_path(state, prefix, log_prob):
-            ret = []
-            if nbest.final(state) != weight_zero:
-                final_log_prob = Z - log_prob - wcfun(nbest.final(state))
-                ret = [ViterbiPath(list(prefix), np.exp(
-                    final_log_prob), final_log_prob)]
-
-            if nbest.num_arcs(state) == 1:
-                arc, = nbest.arcs(state)
-                if arc.olabel != 0:
-                    prefix.append(arc.olabel)
-                return ret + dump_best_path(arc.nextstate, prefix, log_prob + wcfun(arc.weight))
-
-            for arc in nbest.arcs(state):
-                arc_prefix = list(prefix)
-                if arc.olabel != 0:
-                    prefix.append(arc.olabel)
-                ret.extend(dump_best_path(arc.nextstate, arc_prefix,
-                           log_prob + wcfun(arc.weight)))
-            return ret
-
-        return dump_best_path(nbest.start(), [], 0.0)
-
-    # naive FST and lattice helper methods
-
-    def text_to_fst(self, text, arc_type="log", char_symb=None, prepend_space=True):
-        if char_symb is None:
-            char_symb = self.CHAR_SYMB
-        out = self.arc_type_to_fst[arc_type]()
-        out.add_state()
-        out.set_start(0)
-        out.set_input_symbols(char_symb)
-        out.set_output_symbols(char_symb)
-        log_one = self.arc_type_to_weigth[arc_type].one()
-        Arc = self.arc_type_to_arc[arc_type]
-        state = 0
-        if prepend_space:
-            text = ' ' + text
-        for c in text:
-            # handle weird SP spacer
-            if c == ' ':
-                c = '▁'
-            c = char_symb.find_index(c)
-            new_state = out.add_state()
-            out.add_arc(state, Arc(c, c, log_one, new_state))
-            state = new_state
-        out.set_final(state, log_one)
-        return out
-
-    def get_lattice_naive(self, sentence_text, sp_to_char, prepend_space=True):
-        arc_type = next(iter(sp_to_char.arcs(sp_to_char.start()))).type()
-        sentence_fst = self.text_to_fst(sentence_text, arc_type=arc_type,
-                                        char_symb=sp_to_char.input_symbols(), prepend_space=prepend_space)
-        lattice = fst.compose(sentence_fst, sp_to_char)
-        return lattice
-
-    def compute_piece_counts_naive(self, sentence_text, sp_to_char, prepend_space=True):
-        lattice = self.get_lattice_naive(
-            sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
-        alphas = [w.value for w in fst.shortestdistance(lattice)]
-        betas = [w.value for w in fst.shortestdistance(lattice, reverse=True)]
-        # The cost of reaching the entry node from all terminals - tot cost of the lattice
-        Z = betas[lattice.start()]
-        counts = {}
-        for state in range(lattice.num_states()):
-            for arc in lattice.arcs(state):
-                if arc.olabel == 0:
-                    # skip epsilon arcs
-                    continue
-                # prob(reach_state)*prob(exit_from_nextstate)*prob(sumbol_unigram) / sum_allpaths(prob(path))
-                log_count = Z - \
-                    (alphas[state] + betas[arc.nextstate] + arc.weight.value)
-                if arc.olabel not in counts:
-                    counts[arc.olabel] = log_count
-                else:
-                    counts[arc.olabel] = np.logaddexp(
-                        counts[arc.olabel], log_count)
-        for k in counts:
-            counts[k] = np.exp(counts[k])
-        return PieceCounts(Z, counts)
-
-    def viterbi_naive(self, sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepend_space=True):
-        lattice = self.get_lattice_naive(
-            sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
-        if normalize_probs:
-            lattice_log = self._to_log_lattice(lattice)
-            Z = fst.shortestdistance(lattice_log, reverse=True)[
-                lattice_log.start()].value
-        else:
-            Z = 0.0  # speed hack
-        nbest = fst.shortestpath(lattice, nshortest=nshortest)
-        # shortestpath fails anyway for Log FST
-        weight_zero = fst.TropicalWeight.zero()
-
-        def dump_best_path(state, prefix, log_prob):
-            ret = []
-            if nbest.final(state) != weight_zero:
-                final_log_prob = Z - log_prob - nbest.final(state).value
-                ret = [ViterbiPath(list(prefix), np.exp(
-                    final_log_prob), final_log_prob)]
-
-            if nbest.num_arcs(state) == 1:
-                arc, = nbest.arcs(state)
-                if arc.olabel != 0:
-                    prefix.append(arc.olabel)
-                return ret + dump_best_path(arc.nextstate, prefix, log_prob + arc.weight.value)
-
-            for arc in nbest.arcs(state):
-                arc_prefix = list(prefix)
-                if arc.olabel != 0:
-                    prefix.append(arc.olabel)
-                ret.extend(dump_best_path(arc.nextstate,
-                           arc_prefix, log_prob + arc.weight.value))
-            return ret
-
-        return dump_best_path(nbest.start(), [], 0.0)
 
     # EM, based on unigram_model_trainer.cc
 
@@ -440,7 +277,7 @@ class SentencePieceTrainer(object):
             n_sentences += sent_count
             # TODO: bug, should incorporate sent_count. This bug seems to be in C++ code too
             # please check self._reproduce_counting_bug
-            n_tokens += len(self.viterbi(sentence, sp_to_char_std)[0][0])
+            n_tokens += len(fst_tools.viterbi(sentence, sp_to_char_std)[0][0])
             for symbol, count in counts.counts.items():
                 total_counts[symbol] += count * sent_count
         objective /= n_sentences
@@ -452,10 +289,10 @@ class SentencePieceTrainer(object):
         for piece in pieces:
             count = counts[piece.index]
 
-#             if len(piece.symbol) == 1:
-#                 new_pieces.append(SentencePiece(piece.index, piece.symbol, count))
-#                 sum_counts += count
-#                 continue
+            # if len(piece.symbol) == 1:
+            #     new_pieces.append(SentencePiece(piece.index, piece.symbol, count))
+            #     sum_counts += count
+            #     continue
 
             if count < kExpectedFrequencyThreshold:
                 continue
@@ -473,7 +310,7 @@ class SentencePieceTrainer(object):
         always_keep = {}
         alternatives = {}
         for piece in pieces:
-            nbest = self.viterbi_naive(
+            nbest = fst_tools.viterbi(
                 piece.symbol, sp_to_char, nshortest=2, normalize_probs=False, prepend_space=False)
             if len(nbest) == 1:
                 #                 print(f'PP {piece.symbol} always keep true FS {nbest[0].log_prob}')
@@ -485,7 +322,7 @@ class SentencePieceTrainer(object):
                 always_keep[piece.index] = False
                 continue
             always_keep[piece.index] = True
-#             print(f'PP {piece.symbol} always keep true FS {nbest[0].log_prob}/{nbest[1].log_prob} alternatives {[self.PIECE_SYMB.find_symbol(pi) for pi in nbest[1].path]}')
+            #print(f'PP {piece.symbol} always keep true FS {nbest[0].log_prob}/{nbest[1].log_prob} alternatives {[self.PIECE_SYMB.find_symbol(pi) for pi in nbest[1].path]}')
             alternatives[piece.index] = nbest[1].path
 
         inverted = defaultdict(list)
@@ -493,7 +330,7 @@ class SentencePieceTrainer(object):
         v_sums = 0
         for sent_i, (sentence, sent_count) in enumerate(sentences):
             v_sums += sent_count
-            nbest, = self.viterbi(sentence, sp_to_char)
+            nbest, = fst_tools.viterbi(sentence, sp_to_char)
             for piece in nbest.path:
                 inverted[piece].append(sent_i)
                 piece_usage_counts[piece] += sent_count
@@ -507,7 +344,7 @@ class SentencePieceTrainer(object):
             p_id = piece.index
             if not alternatives.get(p_id):
                 new_pieces.append(piece)
-#                 print(f'{p_id}/{piece.symbol} accepted for lack of alternatives')
+                #print(f'{p_id}/{piece.symbol} accepted for lack of alternatives')
                 continue
 
             if piece_usage_counts[p_id] == 0 and not always_keep[p_id]:
@@ -530,7 +367,7 @@ class SentencePieceTrainer(object):
                 logprob_alt += np.log(
                     piece_usage_counts[alt_piece_id] + piece_usage_counts[p_id]) - logsum_alt
             loss = F * (logprob_sp - logprob_alt)
-#             print(f'{p_id}/{piece.symbol} loss {loss}')
+            #print(f'{p_id}/{piece.symbol} loss {loss}')
 
             candidates.append((-loss, piece))
 
@@ -543,12 +380,12 @@ class SentencePieceTrainer(object):
 # for development testing
 if __name__=="__main__":
     # list of strings
-    string_data = list(line.strip() for line in open('./botchan_small.txt', 'r', encoding='utf8'))
+    string_data = list(line.strip() for line in open('./data/botchan_small.txt', 'r', encoding='utf8'))
     # train model
     model = SentencePieceTrainer.train(string_data)
-    for p in model:
-        print(p)
+    
     # example sentence (string)
-    sentence = 'I saw a girl with a telescope.'
+    sentences = ['I saw a girl with a telescope.']
     # segmenting the sentence
-    #encoding = model.encode(sentence)
+    encoding = model.encode(sentences)
+    print(encoding)
