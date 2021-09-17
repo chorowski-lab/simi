@@ -45,6 +45,7 @@ class SentencePieceTrainer:
         self.CHAR_SYMB = CHAR_SYMB
         self.PIECE_SYMB = PIECE_SYMB
     
+    
     # Create an FST that matches sentencepieces to texts. 
     # This one should be pruned after each iteration to speed things up.
     arc_type_to_fst = {
@@ -347,6 +348,9 @@ class SentencePieceTrainer:
         alternatives = {}
         for piece in pieces:
             nbest = self.viterbi_naive(piece.symbol, sp_to_char, nshortest=2, normalize_probs=False, prepend_space=False)
+            #if nbest!=nbest2:
+            #    sp_to_char.write("simi/fst_sp/debug/sp_to_chr.dmp")
+            #    assert(nbest==nbest2)
             if len(nbest) == 1:
 #                 print(f'PP {piece.symbol} always keep true FS {nbest[0].log_prob}')
                 always_keep[piece.index] = True

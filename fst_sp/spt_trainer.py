@@ -42,11 +42,11 @@ class SentencePieceTrainer(object):
 
         # Makes an enhanced suffix array to extract all sub strings occurring
         # more than 2 times in the sentence.
-
-        delimiter = u'\u25C6'
+        
+        delimiter=u'\u25C6'
 
         esa = ESA()
-        esa.fit([], delimiter=delimiter,
+        esa.fit([s+delimiter for s,c in sentences], delimiter=delimiter,
                 max_piece_len=max_piece_length, debug=debug)
 
         seed_sentp = sorted(esa.pieces(), key=lambda p_score: -p_score[1])
@@ -59,7 +59,7 @@ class SentencePieceTrainer(object):
 
         # all_chars must be included in the seed sentencepieces.
         all_chars = Counter()
-        for s in sentences:
+        for (s,c) in sentences:
             all_chars.update(s)
         del all_chars[delimiter]
 
@@ -71,8 +71,6 @@ class SentencePieceTrainer(object):
         seed_sentp.insert(0, ("<unk>", 0))
         seed_sentp.insert(1, ("<s>", 0))
         seed_sentp.insert(2, ("</s>", 0))
-
-        #print(" ".join(s for s,c in seed_sentp[:50]))
 
         print(f"Initialized {len(seed_sentp)} seed sentencepieces")
         return [SentencePiece(ind, symb, freq) for ind, (symb, freq) in enumerate(seed_sentp)]
@@ -104,8 +102,7 @@ class SentencePieceTrainer(object):
                                                        debug=verbose)
 
         # Sentencepiece training
-        T = SentencePieceTrainer(pieces)  # in kaldi_fst_sp
-        sentences = [fst.Sentence(text, 1) for text in sentences]
+        T = SentencePieceTrainer(pieces)  
 
         while True:
             for sub_iter in range(num_subiter):
@@ -124,7 +121,8 @@ class SentencePieceTrainer(object):
 
         pieces = sorted(pieces, key=lambda x: -x.log_freq)
 
-        return SentencePieceModel(pieces=pieces)
+        return pieces
+        #return SentencePieceModel(pieces=pieces)
 
     def __init__(self, INITIAL_PIECES):
         self._init_symbols(INITIAL_PIECES)
@@ -541,3 +539,16 @@ class SentencePieceTrainer(object):
             candidates)[:pruned_size - len(new_pieces)]])
 
         return new_pieces
+
+# for development testing
+if __name__=="__main__":
+    # list of strings
+    string_data = list(line.strip() for line in open('./botchan_small.txt', 'r', encoding='utf8'))
+    # train model
+    model = SentencePieceTrainer.train(string_data)
+    for p in model:
+        print(p)
+    # example sentence (string)
+    sentence = 'I saw a girl with a telescope.'
+    # segmenting the sentence
+    #encoding = model.encode(sentence)

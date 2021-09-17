@@ -9,8 +9,10 @@ spm.SentencePieceTrainer.train(
     model_writer=model,
     vocab_size=100, 
     shrinking_factor=0.75,
+    #use_all_vocab=True,
     #shuffle_input_sentence=0,
-    num_sub_iterations=2
+    num_sub_iterations=2,
+    max_sentencepiece_length = 10,
 )
 
 sp = spm.SentencePieceProcessor(model_proto=model.getvalue())
