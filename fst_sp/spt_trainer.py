@@ -1,13 +1,18 @@
 from collections import Counter, defaultdict
+import multiprocessing as mpr
+import time
 
-import kaldi.fstext as fst
 import numpy as np
+from numpy.ma.core import count
 from scipy.special import digamma, logsumexp
 
+import fst_tools
 from esa import ESA
 from spt_model import SentencePieceModel
-import fst_tools
-from utils import EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath
+from utils import EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath, parallelize, add_dicts
+
+#logger = mpr.log_to_stderr()
+#logger.setLevel(mpr.SUBDEBUG)
 
 
 class SentencePieceTrainerParameters(object):
@@ -84,7 +89,7 @@ class SentencePieceTrainer(object):
     #
     # Also, the parameters are subjects for change (specifically addition).
     @staticmethod
-    def train(sentences, vocab_size=90, prune_fact=0.85, num_subiter=2, seed_vocab_size=10000000, max_piece_length=100, verbose=False) -> SentencePieceModel:
+    def train(sentences, vocab_size=110, prune_fact=0.85, num_subiter=2, seed_vocab_size=10000000, max_piece_length=100, verbose=False) -> SentencePieceModel:
 
         types = [type(s) for s in sentences]
 
@@ -97,29 +102,36 @@ class SentencePieceTrainer(object):
         else:
             raise NotImplementedError()
 
+        t0 = time.time()
         pieces = SentencePieceTrainer.get_seed_pieces(sentences,  # In esa
                                                        seed_vocab_size=seed_vocab_size,
                                                        max_piece_length=max_piece_length,
                                                        debug=verbose)
-
+        t1=time.time()
         # Sentencepiece training
         T = SentencePieceTrainer(pieces)  
 
         while True:
+            t00=time.time()
             for sub_iter in range(num_subiter):
                 e_ret = T.EStep(pieces, sentences)
                 pieces = T.MStep(pieces, e_ret.counts)
                 print(f"EM sub_iter={sub_iter} size={len(pieces)} tot_piece_prob={np.exp(logsumexp([piece.log_freq for piece in pieces]))} "
                       f"obj={e_ret.objective} num_tokens={e_ret.n_tokens} num_tokens/piece={e_ret.n_tokens / len(pieces)}")
+            t01=time.time()
+            print(f"Time {num_subiter}xEM: {t01-t00}")
 
             if len(pieces) <= vocab_size:
                 break
-
+            
+            t10 = time.time()
             pieces = T.prune_pieces(pieces, sentences, vocab_size, prune_fact)
+            t11 =time.time()
 
             if len(pieces) <= vocab_size:
                 break
 
+        t2= time.time()
         pieces = sorted(pieces, key=lambda x: -x.log_freq)
         pieces.insert(0, SentencePiece(0,"<unk>", 0))
         pieces.insert(1, SentencePiece(0,"<s>", 0)) #unused so far
@@ -128,6 +140,8 @@ class SentencePieceTrainer(object):
 
         T2 = SentencePieceTrainer(pieces)
         sp_to_char = T2.get_sp_to_char(pieces,'standard')
+
+        print(f"Preparing seed vocab took {t1-t0} seconds, learning unigram model {t2-t1} seconds.")
 
         return SentencePieceModel(model=sp_to_char, vocab=pieces)
 
@@ -139,7 +153,7 @@ class SentencePieceTrainer(object):
 
     def _init_symbols(self, INITIAL_PIECES):
         # Create symbol tables for FSTs, these can stay constant through training
-        CHAR_SYMB = fst.SymbolTable()
+        CHAR_SYMB = fst_tools.SymbolTable()
         CHAR_SYMB.add_symbol('<eps>')
 
         for piece in INITIAL_PIECES:
@@ -149,7 +163,7 @@ class SentencePieceTrainer(object):
                 if CHAR_SYMB.find_index(char) == -1:
                     CHAR_SYMB.add_symbol(char)
 
-        PIECE_SYMB = fst.SymbolTable()
+        PIECE_SYMB = fst_tools.SymbolTable()
         PIECE_SYMB.add_symbol('<eps>')
         for piece in INITIAL_PIECES[1:]:
             PIECE_SYMB.add_pair(piece.symbol, piece.index)
@@ -160,18 +174,7 @@ class SentencePieceTrainer(object):
 
     # Create an FST that matches sentencepieces to texts.
     # This one should be pruned after each iteration to speed things up.
-    arc_type_to_fst = {
-        'log': fst.LogVectorFst,
-        'standard': fst.StdVectorFst
-    }
-    arc_type_to_arc = {
-        'log': fst.LogArc,
-        'standard': fst.StdArc
-    }
-    arc_type_to_weigth = {
-        'log': fst.LogWeight,
-        'standard': fst.TropicalWeight
-    }
+
 
     def get_sp_to_char(self, pieces, arc_type='log', piece_symb=None, char_symb=None):
         if piece_symb is None:
@@ -183,9 +186,9 @@ class SentencePieceTrainer(object):
             char_symb.find_symbol(i) for i in range(1, char_symb.num_symbols())
         }
 
-        sp_to_char = self.arc_type_to_fst[arc_type]()
-        Weight = self.arc_type_to_weigth[arc_type]
-        Arc = self.arc_type_to_arc[arc_type]
+        sp_to_char = fst_tools.arc_type_to_fst[arc_type]()
+        Weight = fst_tools.arc_type_to_weigth[arc_type]
+        Arc = fst_tools.arc_type_to_arc[arc_type]
         sp_to_char.set_output_symbols(piece_symb)
         sp_to_char.set_input_symbols(char_symb)
         sp_to_char.add_state()
@@ -231,56 +234,36 @@ class SentencePieceTrainer(object):
 
     # Kaldi decoder based helper methods
 
-    def compute_piece_counts(self, sentence_text, sp_to_char, prepend_space=True, unigram_weight=1.0):
-        lattice_kaldi = fst_tools.get_lattice(
-            sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
-        # Convert the lattice to log semiring
-        # The LatticeWeigth behaves like <Tropical, Tropical> and while it will be faster, the counts will be more approximate
-        lattice = fst_tools._to_log_lattice(
-            lattice_kaldi, lambda w: unigram_weight * w.value1 + w.value2)
-        alphas = [w.value for w in fst.shortestdistance(lattice)]
-        betas = [w.value for w in fst.shortestdistance(lattice, reverse=True)]
-        # The cost of reaching the entry node from all terminals - tot cost of the lattice
-        Z = betas[lattice.start()]
-        counts = {}
-        for state in range(lattice.num_states()):
-            for arc in lattice.arcs(state):
-                if arc.olabel == 0:
-                    # skip epsilon arcs
-                    continue
-                # prob(reach_state)*prob(exit_from_nextstate)*prob(sumbol_unigram) / sum_allpaths(prob(path))
-                log_count = Z - \
-                    (alphas[state] + betas[arc.nextstate] + arc.weight.value)
-                if arc.olabel not in counts:
-                    counts[arc.olabel] = log_count
-                else:
-                    counts[arc.olabel] = np.logaddexp(
-                        counts[arc.olabel], log_count)
-        for k in counts:
-            counts[k] = np.exp(counts[k])
-        return PieceCounts(Z, counts)
 
 
     # EM, based on unigram_model_trainer.cc
 
     def EStep(self, pieces, sentences):
-        objective = 0.0
-        n_sentences = 0  # all_sentence_freq in sentencepiece
-        n_tokens = 0
+
         sp_to_char_std = self.get_sp_to_char(pieces, 'standard')
-        total_counts = defaultdict(float)
-        # TODO: parallelize
-        for sentence, sent_count in sentences:
-            counts = self.compute_piece_counts(sentence, sp_to_char_std)
-            assert np.isfinite(counts.Z)
-            objective += counts.Z * sent_count
-            n_sentences += sent_count
-            # TODO: bug, should incorporate sent_count. This bug seems to be in C++ code too
-            # please check self._reproduce_counting_bug
-            n_tokens += len(fst_tools.viterbi(sentence, sp_to_char_std)[0][0])
-            for symbol, count in counts.counts.items():
-                total_counts[symbol] += count * sent_count
-        objective /= n_sentences
+
+        def worker(sentences, output:mpr.Queue):
+            part_counts = defaultdict(float)
+            part_obj = 0
+            part_n_tokens = 0
+            for sentence, sent_count in sentences:
+                counts = fst_tools.compute_piece_counts(sentence, sp_to_char_std)
+                assert np.isfinite(counts.Z)
+                part_obj += counts.Z* sent_count
+                part_counts = add_dicts(part_counts, counts.counts, mult=sent_count)
+                part_n_tokens += len(fst_tools.viterbi(sentence, sp_to_char_std)[0][0])
+
+            output.put([part_counts, part_obj, part_n_tokens])
+
+        add_nr = lambda a,b: a+b
+
+        total_counts, objective, n_tokens= parallelize(
+            worker,
+            sentences,
+            aggregating_ops= [add_dicts, add_nr, add_nr]
+        )
+
+        objective /= len(sentences)
         return EStepRet(objective, n_tokens, total_counts)
 
     def MStep(self, pieces, counts, kExpectedFrequencyThreshold=0.5):
@@ -305,39 +288,55 @@ class SentencePieceTrainer(object):
         return new_pieces
 
     def prune_pieces(self, pieces, sentences, desired_size, prune_frac):
+        t0=time.time()
         sp_to_char = self.get_sp_to_char(pieces, arc_type='standard')
+        
+        ### Process necessary pieces and alternatives in parallel
 
-        always_keep = {}
-        alternatives = {}
-        for piece in pieces:
-            nbest = fst_tools.viterbi(
-                piece.symbol, sp_to_char, nshortest=2, normalize_probs=False, prepend_space=False)
-            if len(nbest) == 1:
-                #                 print(f'PP {piece.symbol} always keep true FS {nbest[0].log_prob}')
+        def piece_worker(pieces, output:mpr.Queue):
+            always_keep = {}
+            alternatives = {}
+            for piece in pieces:
+                nbest = fst_tools.viterbi(
+                    piece.symbol, sp_to_char, nshortest=2, normalize_probs=False, prepend_space=False)
+                if len(nbest) == 1:
+                    always_keep[piece.index] = True
+                    continue
+                if len(nbest[0].path) > 1:
+                    # The best tokenization for this piece is not itself!
+                    always_keep[piece.index] = False
+                    continue
                 always_keep[piece.index] = True
-                continue
-            if len(nbest[0].path) > 1:
-                # The best tokenization for this piece is not itself!
-                #                 print(f'PP {piece.symbol} always keep false FS {nbest[0].log_prob}/{nbest[1].log_prob}')
-                always_keep[piece.index] = False
-                continue
-            always_keep[piece.index] = True
-            #print(f'PP {piece.symbol} always keep true FS {nbest[0].log_prob}/{nbest[1].log_prob} alternatives {[self.PIECE_SYMB.find_symbol(pi) for pi in nbest[1].path]}')
-            alternatives[piece.index] = nbest[1].path
+                alternatives[piece.index] = nbest[1].path
+            output.put([always_keep, alternatives])
 
-        inverted = defaultdict(list)
-        piece_usage_counts = defaultdict(float)
-        v_sums = 0
-        for sent_i, (sentence, sent_count) in enumerate(sentences):
-            v_sums += sent_count
-            nbest, = fst_tools.viterbi(sentence, sp_to_char)
-            for piece in nbest.path:
-                inverted[piece].append(sent_i)
-                piece_usage_counts[piece] += sent_count
+        t1=time.time()
+        dict_union = lambda a,b: a.update(b) or a # or a to return a value
+        always_keep, alternatives = parallelize(piece_worker, pieces, aggregating_ops = [dict_union, dict_union])
+        t2=time.time()
+
+        #### Count pieces in corpus in parallel  
+        
+        def worker(sentences, output:mpr.Queue):
+            v_sums = 0
+            inverted = defaultdict(list)
+            piece_usage_counts = defaultdict(float)
+            for sent_i, (sentence, sent_count) in sentences:
+                v_sums += sent_count
+                nbest, = fst_tools.viterbi(sentence, sp_to_char, normalize_probs=False)
+                for piece in nbest.path:
+                    inverted[piece].append(sent_i)
+                    piece_usage_counts[piece] += sent_count
+            output.put([inverted, piece_usage_counts, v_sums])
+        
+        inverted, piece_usage_counts, v_sums = parallelize(worker, list(enumerate(sentences)), 
+                                            aggregating_ops = [add_dicts, add_dicts, lambda a,b:a+b ] )
+        ####
 
         usage_sum = sum(piece_usage_counts.values())
         log_usage_sum = np.log(usage_sum)
 
+        t3=time.time()
         new_pieces = []
         candidates = []
         for piece in pieces:
@@ -371,21 +370,34 @@ class SentencePieceTrainer(object):
 
             candidates.append((-loss, piece))
 
+
         pruned_size = max(desired_size, int(len(pieces) * prune_frac))
         new_pieces.extend([piece for _, piece in sorted(
             candidates)[:pruned_size - len(new_pieces)]])
 
+        t4=time.time()
+
+        print(f"Time of Pruning: {t4-t0}: {t2-t1} {t3-t2}")
         return new_pieces
 
 # for development testing
 if __name__=="__main__":
     # list of strings
-    string_data = list(line.strip() for line in open('./data/botchan_small.txt', 'r', encoding='utf8'))
+    string_data = list(line.strip() for line in open('./data/botchan.txt', 'r', encoding='utf8'))
     # train model
-    model = SentencePieceTrainer.train(string_data)
-    
+    model = SentencePieceTrainer.train(string_data,vocab_size=5000)
+    alphabet = set('abcdefghijklmnopqrstuvwxyz')
+    for (i,s,c) in model.vocab:
+        if len(s)==1 and s in alphabet:
+            alphabet.remove(s)
+        if (i<500):
+            print(f"{i:<5}{s:25}{c:20}")
+    print(f"Letters not in vocab: {alphabet}")
     # example sentence (string)
     sentences = ['I saw a girl with a telescope.']
     # segmenting the sentence
     encoding = model.encode(sentences)
-    print(encoding)
+
+    for i in range(len(sentences)):
+        print(" ".join(encoding[i]))
+        
