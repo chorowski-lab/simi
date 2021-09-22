@@ -1,6 +1,6 @@
-from collections import Counter, defaultdict
 import multiprocessing as mpr
 import time
+from collections import Counter, defaultdict
 
 import numpy as np
 from numpy.ma.core import count
@@ -9,10 +9,11 @@ from scipy.special import digamma, logsumexp
 import fst_tools
 from esa import ESA
 from spt_model import SentencePieceModel
-from utils import EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath, parallelize, add_dicts
+from utils import (EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath,
+                   add_dicts, parallelize)
 
-#logger = mpr.log_to_stderr()
-#logger.setLevel(mpr.SUBDEBUG)
+# logger = mpr.log_to_stderr()
+# logger.setLevel(mpr.SUBDEBUG)
 
 
 class SentencePieceTrainerParameters(object):
@@ -47,11 +48,11 @@ class SentencePieceTrainer(object):
 
         # Makes an enhanced suffix array to extract all sub strings occurring
         # more than 2 times in the sentence.
-        
-        delimiter=u'\u25C6'
+
+        delimiter = u'\u25C6'
 
         esa = ESA()
-        esa.fit([s+delimiter for s,c in sentences], delimiter=delimiter,
+        esa.fit([s+delimiter for s, c in sentences], delimiter=delimiter,
                 max_piece_len=max_piece_length, debug=debug)
 
         seed_sentp = sorted(esa.pieces(), key=lambda p_score: -p_score[1])
@@ -64,7 +65,7 @@ class SentencePieceTrainer(object):
 
         # all_chars must be included in the seed sentencepieces.
         all_chars = Counter()
-        for (s,c) in sentences:
+        for (s, c) in sentences:
             all_chars.update(s)
         del all_chars[delimiter]
 
@@ -75,7 +76,7 @@ class SentencePieceTrainer(object):
         seed_sentp = to_log_prob(seed_sentp)
         seed_sentp = sorted(seed_sentp, key=lambda p_score: -p_score[1])
         seed_sentp.insert(0, ("<unk>", 0))
-        seed_sentp.insert(1, ("<s>", 0)) #unused so far
+        seed_sentp.insert(1, ("<s>", 0))  # unused so far
         seed_sentp.insert(2, ("</s>", 0))
 
         print(f"Initialized {len(seed_sentp)} seed sentencepieces")
@@ -104,64 +105,69 @@ class SentencePieceTrainer(object):
 
         t0 = time.time()
         pieces = SentencePieceTrainer.get_seed_pieces(sentences,  # In esa
-                                                       seed_vocab_size=seed_vocab_size,
-                                                       max_piece_length=max_piece_length,
-                                                       debug=verbose)
-        t1=time.time()
+                                                      seed_vocab_size=seed_vocab_size,
+                                                      max_piece_length=max_piece_length,
+                                                      debug=verbose)
+
         # Sentencepiece training
-        T = SentencePieceTrainer(pieces)  
+        T = SentencePieceTrainer(pieces)
 
         while True:
-            t00=time.time()
+            t00 = time.time()
             for sub_iter in range(num_subiter):
                 e_ret = T.EStep(pieces, sentences)
                 pieces = T.MStep(pieces, e_ret.counts)
                 print(f"EM sub_iter={sub_iter} size={len(pieces)} tot_piece_prob={np.exp(logsumexp([piece.log_freq for piece in pieces]))} "
                       f"obj={e_ret.objective} num_tokens={e_ret.n_tokens} num_tokens/piece={e_ret.n_tokens / len(pieces)}")
-            t01=time.time()
+            t01 = time.time()
             print(f"Time {num_subiter}xEM: {t01-t00}")
 
             if len(pieces) <= vocab_size:
                 break
-            
+
             t10 = time.time()
             pieces = T.prune_pieces(pieces, sentences, vocab_size, prune_fact)
-            t11 =time.time()
+            t11 = time.time()
 
             if len(pieces) <= vocab_size:
                 break
 
-        t2= time.time()
+        t2 = time.time()
         pieces = sorted(pieces, key=lambda x: -x.log_freq)
-        pieces.insert(0, SentencePiece(0,"<unk>", 0))
-        pieces.insert(1, SentencePiece(0,"<s>", 0)) #unused so far
-        pieces.insert(2, SentencePiece(0,"</s>", 0))
-        pieces = [ SentencePiece(i, sentence, log_freq) for i,(_,sentence,log_freq) in enumerate(pieces)]
+        pieces.insert(0, SentencePiece(0, "<unk>", 0))
+        pieces.insert(1, SentencePiece(0, "<s>", 0))  # unused so far
+        pieces.insert(2, SentencePiece(0, "</s>", 0))
+        pieces = [SentencePiece(i, sentence, log_freq, weights)
+                  for i, (_, sentence, log_freq, weights) in enumerate(pieces)]
 
         T2 = SentencePieceTrainer(pieces)
-        sp_to_char = T2.get_sp_to_char(pieces,'standard')
+        sp_to_char = T2.get_sp_to_char(pieces, 'standard')
 
-        print(f"Preparing seed vocab took {t1-t0} seconds, learning unigram model {t2-t1} seconds.")
+        print(
+            f"Preparing seed vocab took {t1-t0} seconds, learning unigram model {t2-t1} seconds.")
 
         return SentencePieceModel(model=sp_to_char, vocab=pieces)
 
-    def __init__(self, INITIAL_PIECES):
-        self._init_symbols(INITIAL_PIECES)
+    def __init__(self, INITIAL_PIECES, complex_pieces=False):
+        self._complex_pieces = complex_pieces
         self._unk_penalty = 10
         self._reproduce_unk_bug = True
         # self._reproduce_counting_bug = True
+        self._looping_weight = 0.9
+        self._init_symbols(INITIAL_PIECES)
 
     def _init_symbols(self, INITIAL_PIECES):
         # Create symbol tables for FSTs, these can stay constant through training
         CHAR_SYMB = fst_tools.SymbolTable()
         CHAR_SYMB.add_symbol('<eps>')
-
+        SPECIAL_CHARS = '|+' if self._complex_pieces else ''
         for piece in INITIAL_PIECES:
             if piece.log_freq == 0:
                 continue
             for char in piece.symbol:
-                if CHAR_SYMB.find_index(char) == -1:
+                if char not in SPECIAL_CHARS and CHAR_SYMB.find_index(char) == -1:
                     CHAR_SYMB.add_symbol(char)
+                # CHAR_SYMB.add_symbol(char)
 
         PIECE_SYMB = fst_tools.SymbolTable()
         PIECE_SYMB.add_symbol('<eps>')
@@ -174,7 +180,6 @@ class SentencePieceTrainer(object):
 
     # Create an FST that matches sentencepieces to texts.
     # This one should be pruned after each iteration to speed things up.
-
 
     def get_sp_to_char(self, pieces, arc_type='log', piece_symb=None, char_symb=None):
         if piece_symb is None:
@@ -195,30 +200,45 @@ class SentencePieceTrainer(object):
         sp_to_char.set_start(0)
         log_one = Weight.one()
         sp_to_char.set_final(0, log_one)
-
+        variants = [v for piece in pieces for v in piece.variants()
+                    ] if self._complex_pieces else pieces
         prefix2state = [('', 0)]
-        for piece in sorted(pieces, key=lambda x: x.symbol):
+        for piece in sorted(variants, key=lambda x: x.symbol):
             if piece.log_freq == 0:
                 continue
-            if not piece.symbol == piece_symb.find_symbol(piece.index):
-                print(piece.symbol , piece_symb.find_symbol(piece.index))
-            assert piece.symbol == piece_symb.find_symbol(piece.index)
 
             required_pieces.discard(piece.symbol)
 
             while not piece.symbol.startswith(prefix2state[-1][0]):
                 prefix2state.pop()
             state = prefix2state[-1][1]
+            next_weight = log_one
             for i in range(len(prefix2state[-1][0]), len(piece.symbol)-1):
-                # for char in piece.symbol[len(prefix2state[-1][0]):-1]:
                 char = piece.symbol[i]
+                if self._complex_pieces and char == '+':
+                    continue
                 new_state = sp_to_char.add_state()
-                prefix2state.append((piece.symbol[:i+1], new_state))
-                sp_to_char.add_arc(state, Arc(
-                    char_symb.find_index(char), 0, log_one, new_state))
+                nextchar = piece.symbol[i+1]
+                if self._complex_pieces and nextchar == '+':
+                    prefix2state.append((piece.symbol[:i+2], new_state))
+                    sp_to_char.add_arc(state, Arc(
+                        char_symb.find_index(char), 0, next_weight, new_state))
+                    sp_to_char.add_arc(new_state, Arc(
+                        char_symb.find_index(char), 0, Weight(-np.log(self._looping_weight)), new_state))
+                    next_weight = Weight(-np.log(1 - self._looping_weight))
+                else:
+                    prefix2state.append((piece.symbol[:i+1], new_state))
+                    sp_to_char.add_arc(state, Arc(
+                        char_symb.find_index(char), 0, next_weight, new_state))
+                    next_weight = log_one
                 state = new_state
-            sp_to_char.add_arc(state, Arc(
-                char_symb.find_index(piece.symbol[-1]), piece.index, Weight(-piece.log_freq), 0))
+
+            if self._complex_pieces and piece.symbol[-1] == '+':
+                sp_to_char.add_arc(state, Arc(
+                    char_symb.find_index("<eps>"), piece.index, Weight(-piece.log_freq+next_weight.value), 0))
+            else:
+                sp_to_char.add_arc(state, Arc(
+                    char_symb.find_index(piece.symbol[-1]), piece.index, Weight(-piece.log_freq+next_weight.value), 0))
 
         unk_penalty = min(
             pieces, key=lambda x: x.log_freq).log_freq - self._unk_penalty
@@ -234,33 +254,34 @@ class SentencePieceTrainer(object):
 
     # Kaldi decoder based helper methods
 
-
-
     # EM, based on unigram_model_trainer.cc
 
     def EStep(self, pieces, sentences):
 
         sp_to_char_std = self.get_sp_to_char(pieces, 'standard')
 
-        def worker(sentences, output:mpr.Queue):
+        def worker(sentences, output: mpr.Queue):
             part_counts = defaultdict(float)
             part_obj = 0
             part_n_tokens = 0
             for sentence, sent_count in sentences:
-                counts = fst_tools.compute_piece_counts(sentence, sp_to_char_std)
+                counts = fst_tools.compute_piece_counts(
+                    sentence, sp_to_char_std)
                 assert np.isfinite(counts.Z)
-                part_obj += counts.Z* sent_count
-                part_counts = add_dicts(part_counts, counts.counts, mult=sent_count)
-                part_n_tokens += len(fst_tools.viterbi(sentence, sp_to_char_std)[0][0])
+                part_obj += counts.Z * sent_count
+                part_counts = add_dicts(
+                    part_counts, counts.counts, mult=sent_count)
+                part_n_tokens += len(fst_tools.viterbi(sentence,
+                                     sp_to_char_std)[0][0])
 
             output.put([part_counts, part_obj, part_n_tokens])
 
-        add_nr = lambda a,b: a+b
+        def add_nr(a, b): return a+b
 
-        total_counts, objective, n_tokens= parallelize(
+        total_counts, objective, n_tokens = parallelize(
             worker,
             sentences,
-            aggregating_ops= [add_dicts, add_nr, add_nr]
+            aggregating_ops=[add_dicts, add_nr, add_nr]
         )
 
         objective /= len(sentences)
@@ -279,21 +300,22 @@ class SentencePieceTrainer(object):
 
             if count < kExpectedFrequencyThreshold:
                 continue
-            new_pieces.append(SentencePiece(piece.index, piece.symbol, count))
+            new_pieces.append(SentencePiece(
+                piece.index, piece.symbol, count, piece.weights))
             sum_counts += count
 
         log_sum = digamma(sum_counts)
         new_pieces = [SentencePiece(piece.index, piece.symbol, digamma(
-            piece.log_freq) - log_sum if np.isfinite(digamma(piece.log_freq) - log_sum) else -1e3) for piece in new_pieces]
+            piece.log_freq) - log_sum if np.isfinite(digamma(piece.log_freq) - log_sum) else -1e3, piece.weights) for piece in new_pieces]
         return new_pieces
 
     def prune_pieces(self, pieces, sentences, desired_size, prune_frac):
-        t0=time.time()
+        t0 = time.time()
         sp_to_char = self.get_sp_to_char(pieces, arc_type='standard')
-        
-        ### Process necessary pieces and alternatives in parallel
 
-        def piece_worker(pieces, output:mpr.Queue):
+        # Process necessary pieces and alternatives in parallel
+
+        def piece_worker(pieces, output: mpr.Queue):
             always_keep = {}
             alternatives = {}
             for piece in pieces:
@@ -310,33 +332,35 @@ class SentencePieceTrainer(object):
                 alternatives[piece.index] = nbest[1].path
             output.put([always_keep, alternatives])
 
-        t1=time.time()
-        dict_union = lambda a,b: a.update(b) or a # or a to return a value
-        always_keep, alternatives = parallelize(piece_worker, pieces, aggregating_ops = [dict_union, dict_union])
-        t2=time.time()
+        t1 = time.time()
+        def dict_union(a, b): return a.update(b) or a  # or a to return a value
+        always_keep, alternatives = parallelize(
+            piece_worker, pieces, aggregating_ops=[dict_union, dict_union])
+        t2 = time.time()
 
-        #### Count pieces in corpus in parallel  
-        
-        def worker(sentences, output:mpr.Queue):
+        # Count pieces in corpus in parallel
+
+        def worker(sentences, output: mpr.Queue):
             v_sums = 0
             inverted = defaultdict(list)
             piece_usage_counts = defaultdict(float)
             for sent_i, (sentence, sent_count) in sentences:
                 v_sums += sent_count
-                nbest, = fst_tools.viterbi(sentence, sp_to_char, normalize_probs=False)
+                nbest, = fst_tools.viterbi(
+                    sentence, sp_to_char, normalize_probs=False)
                 for piece in nbest.path:
                     inverted[piece].append(sent_i)
                     piece_usage_counts[piece] += sent_count
             output.put([inverted, piece_usage_counts, v_sums])
-        
-        inverted, piece_usage_counts, v_sums = parallelize(worker, list(enumerate(sentences)), 
-                                            aggregating_ops = [add_dicts, add_dicts, lambda a,b:a+b ] )
+
+        inverted, piece_usage_counts, v_sums = parallelize(worker, list(enumerate(sentences)),
+                                                           aggregating_ops=[add_dicts, add_dicts, lambda a, b:a+b])
         ####
 
         usage_sum = sum(piece_usage_counts.values())
         log_usage_sum = np.log(usage_sum)
 
-        t3=time.time()
+        t3 = time.time()
         new_pieces = []
         candidates = []
         for piece in pieces:
@@ -370,27 +394,28 @@ class SentencePieceTrainer(object):
 
             candidates.append((-loss, piece))
 
-
         pruned_size = max(desired_size, int(len(pieces) * prune_frac))
         new_pieces.extend([piece for _, piece in sorted(
             candidates)[:pruned_size - len(new_pieces)]])
 
-        t4=time.time()
+        t4 = time.time()
 
         print(f"Time of Pruning: {t4-t0}: {t2-t1} {t3-t2}")
         return new_pieces
 
+
 # for development testing
-if __name__=="__main__":
+if __name__ == "__main__":
     # list of strings
-    string_data = list(line.strip() for line in open('./data/botchan.txt', 'r', encoding='utf8'))
+    string_data = list(line.strip() for line in open(
+        './data/botchan.txt', 'r', encoding='utf8'))
     # train model
-    model = SentencePieceTrainer.train(string_data,vocab_size=5000)
+    model = SentencePieceTrainer.train(string_data, vocab_size=5000)
     alphabet = set('abcdefghijklmnopqrstuvwxyz')
-    for (i,s,c) in model.vocab:
-        if len(s)==1 and s in alphabet:
+    for (i, s, c) in model.vocab:
+        if len(s) == 1 and s in alphabet:
             alphabet.remove(s)
-        if (i<500):
+        if (i < 500):
             print(f"{i:<5}{s:25}{c:20}")
     print(f"Letters not in vocab: {alphabet}")
     # example sentence (string)
@@ -400,4 +425,3 @@ if __name__=="__main__":
 
     for i in range(len(sentences)):
         print(" ".join(encoding[i]))
-        

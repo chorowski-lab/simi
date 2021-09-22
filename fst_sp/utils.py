@@ -1,12 +1,36 @@
 from collections import defaultdict, namedtuple
 import multiprocessing as mp
 import math
+import numpy as np
 
 Sentence = namedtuple('Sentence', ['text', 'count'])
-SentencePiece = namedtuple('SentencePiece', ['index', 'symbol', 'log_freq'])
 PieceCounts = namedtuple('PieceCounts', ['Z', 'counts'])
 ViterbiPath = namedtuple('ViterbiPath', ['path', 'prob', 'log_prob'])
 EStepRet = namedtuple('EStepRet', ['objective', 'n_tokens', 'counts'])
+SentencePieceVariant = namedtuple('SentencePieceVariant', ['index', 'piece_symbol', 'symbol', 'log_freq'])
+
+class SentencePiece(object):
+    def __init__(self, index, symbol, log_freq=0, weights=None) -> None:
+        super().__init__()
+        self.index = index
+        self.symbol = symbol
+        self.log_freq = log_freq
+        if weights is None:
+            n = self.symbol.count('|') + 1
+            self.weights = [1./n,] * n
+        else:
+            assert self.symbol.count('|') + 1 == len(weights), \
+                "Invalid length of the weights, must match piece's number of variants"
+            self.weights = weights
+
+    def variants(self):
+        return (SentencePieceVariant(self.index, self.symbol, s, self.log_freq + np.log(self.weights[i])) for i, s in enumerate(self.symbol.split('|')))
+
+    def __lt__(self, other):
+        return self.symbol < other.symbol if self.index == other.index else self.index < other.index
+
+    def __repr__(self):
+        return "SentencePiece" + repr((self.index, self.symbol, self.log_freq, self.weights))
 
 def add_dicts(a, b, mult=1):
     for symb, count in b.items():

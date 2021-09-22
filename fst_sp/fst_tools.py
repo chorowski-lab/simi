@@ -1,16 +1,14 @@
-import numpy as np
-from kaldi import matrix,decoder
 import kaldi.fstext as fst
-from kaldi.fstext import SymbolTable 
+import numpy as np
+from kaldi import decoder, matrix
+from kaldi.fstext import SymbolTable
+
 from utils import EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath
 
-
-
-#text_to_matrix
-#get_lattice
-#_to_log_lattice
-#viterbi
-
+# text_to_matrix
+# get_lattice
+# _to_log_lattice
+# viterbi
 
 
 arc_type_to_fst = {
@@ -26,6 +24,7 @@ arc_type_to_weigth = {
     'standard': fst.TropicalWeight
 }
 
+
 def text_to_matrix(text, char_symb=None, prepend_space=True):
     if prepend_space:
         text = ' ' + text
@@ -40,6 +39,7 @@ def text_to_matrix(text, char_symb=None, prepend_space=True):
         out_np[i, c - 1] = 0
     return matrix.Matrix(out_np)
 
+
 def get_lattice(sentence_text, sp_to_char, prepend_space=True):
     opts = decoder.LatticeFasterDecoderOptions()
     dec = decoder.LatticeFasterDecoder(sp_to_char, opts)
@@ -50,6 +50,7 @@ def get_lattice(sentence_text, sp_to_char, prepend_space=True):
     lattice.set_input_symbols(sp_to_char.input_symbols())
     lattice.set_output_symbols(sp_to_char.output_symbols())
     return lattice
+
 
 def _to_log_lattice(lattice, cfun=lambda x: x.value):
     lattice_log = fst.LogVectorFst()
@@ -62,6 +63,7 @@ def _to_log_lattice(lattice, cfun=lambda x: x.value):
             lattice_log.add_arc(i, fst.LogArc(
                 a.ilabel, a.olabel, fst.LogWeight(cfun(a.weight)), a.nextstate, ))
     return lattice_log
+
 
 def viterbi(sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepend_space=True, unigram_weight=1.0):
     def wcfun(w):
@@ -98,10 +100,11 @@ def viterbi(sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepen
             if arc.olabel != 0:
                 prefix.append(arc.olabel)
             ret.extend(dump_best_path(arc.nextstate, arc_prefix,
-                        log_prob + wcfun(arc.weight)))
+                                      log_prob + wcfun(arc.weight)))
         return ret
 
     return dump_best_path(nbest.start(), [], 0.0)
+
 
 def compute_piece_counts(sentence_text, sp_to_char, prepend_space=True, unigram_weight=1.0):
     lattice_kaldi = get_lattice(
@@ -158,18 +161,22 @@ def text_to_fst(text, arc_type="log", char_symb=None, prepend_space=True):
     out.set_final(state, log_one)
     return out
 
+
 def get_lattice_naive(sentence_text, sp_to_char, prepend_space=True):
     arc_type = next(iter(sp_to_char.arcs(sp_to_char.start()))).type()
-    sentence_fst = text_to_fst(sentence_text, arc_type=arc_type, 
-                                    char_symb=sp_to_char.input_symbols(), prepend_space=prepend_space)
+    sentence_fst = text_to_fst(sentence_text, arc_type=arc_type,
+                               char_symb=sp_to_char.input_symbols(), prepend_space=prepend_space)
     lattice = fst.compose(sentence_fst, sp_to_char)
     return lattice
 
+
 def viterbi_naive(sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepend_space=True):
-    lattice = get_lattice_naive(sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
+    lattice = get_lattice_naive(
+        sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
     if normalize_probs:
         lattice_log = _to_log_lattice(lattice)
-        Z = fst.shortestdistance(lattice_log, reverse=True)[lattice_log.start()].value
+        Z = fst.shortestdistance(lattice_log, reverse=True)[
+            lattice_log.start()].value
     else:
         Z = 0.0  # speed hack
     nbest = fst.shortestpath(lattice, nshortest=nshortest)
@@ -179,8 +186,9 @@ def viterbi_naive(sentence_text, sp_to_char, nshortest=1, normalize_probs=True, 
     def dump_best_path(state, prefix, log_prob):
         ret = []
         if nbest.final(state) != weight_zero:
-            final_log_prob = Z -log_prob -nbest.final(state).value
-            ret = [ViterbiPath(list(prefix), np.exp(final_log_prob), final_log_prob)]
+            final_log_prob = Z - log_prob - nbest.final(state).value
+            ret = [ViterbiPath(list(prefix), np.exp(
+                final_log_prob), final_log_prob)]
 
         if nbest.num_arcs(state) == 1:
             arc, = nbest.arcs(state)
@@ -192,7 +200,8 @@ def viterbi_naive(sentence_text, sp_to_char, nshortest=1, normalize_probs=True, 
             arc_prefix = list(prefix)
             if arc.olabel != 0:
                 prefix.append(arc.olabel)
-            ret.extend(dump_best_path(arc.nextstate, arc_prefix, log_prob + arc.weight.value))
+            ret.extend(dump_best_path(arc.nextstate,
+                       arc_prefix, log_prob + arc.weight.value))
         return ret
 
     return dump_best_path(nbest.start(), [], 0.0)
