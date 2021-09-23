@@ -90,7 +90,7 @@ class SentencePieceTrainer(object):
     #
     # Also, the parameters are subjects for change (specifically addition).
     @staticmethod
-    def train(sentences, vocab_size=110, prune_fact=0.85, num_subiter=2, seed_vocab_size=10000000, max_piece_length=100, verbose=False) -> SentencePieceModel:
+    def train(sentences, vocab_size=110, prune_fact=0.85, num_subiter=2, seed_vocab_size=10000000, max_piece_length=100, verbose=False, complex_pieces=False, initial_pieces=None) -> SentencePieceModel:
 
         types = [type(s) for s in sentences]
 
@@ -104,13 +104,17 @@ class SentencePieceTrainer(object):
             raise NotImplementedError()
 
         t0 = time.time()
-        pieces = SentencePieceTrainer.get_seed_pieces(sentences,  # In esa
-                                                      seed_vocab_size=seed_vocab_size,
-                                                      max_piece_length=max_piece_length,
-                                                      debug=verbose)
+        if initial_pieces is None:
+            pieces = SentencePieceTrainer.get_seed_pieces(sentences,  # In esa
+                                                          seed_vocab_size=seed_vocab_size,
+                                                          max_piece_length=max_piece_length,
+                                                          debug=verbose)
+        else:
+            pieces = initial_pieces
 
+        t1 = time.time()
         # Sentencepiece training
-        T = SentencePieceTrainer(pieces)
+        T = SentencePieceTrainer(pieces, complex_pieces=complex_pieces)
 
         while True:
             t00 = time.time()
@@ -137,8 +141,8 @@ class SentencePieceTrainer(object):
         pieces.insert(0, SentencePiece(0, "<unk>", 0))
         pieces.insert(1, SentencePiece(0, "<s>", 0))  # unused so far
         pieces.insert(2, SentencePiece(0, "</s>", 0))
-        pieces = [SentencePiece(i, sentence, log_freq, weights)
-                  for i, (_, sentence, log_freq, weights) in enumerate(pieces)]
+        pieces = [SentencePiece(i, piece.symbol, piece.log_freq, piece.weights)
+                  for i, piece in enumerate(pieces)]
 
         T2 = SentencePieceTrainer(pieces)
         sp_to_char = T2.get_sp_to_char(pieces, 'standard')
@@ -146,14 +150,16 @@ class SentencePieceTrainer(object):
         print(
             f"Preparing seed vocab took {t1-t0} seconds, learning unigram model {t2-t1} seconds.")
 
-        return SentencePieceModel(model=sp_to_char, vocab=pieces)
+        return SentencePieceModel(model=sp_to_char, pieces=pieces)
 
-    def __init__(self, INITIAL_PIECES, complex_pieces=False):
+    def __init__(self, INITIAL_PIECES, complex_pieces=False, expected_multi_length=5):
         self._complex_pieces = complex_pieces
         self._unk_penalty = 10
         self._reproduce_unk_bug = True
         # self._reproduce_counting_bug = True
-        self._looping_weight = 0.9
+        self._looping_weight = float(
+            expected_multi_length) / (expected_multi_length + 1)
+        print(self._looping_weight)
         self._init_symbols(INITIAL_PIECES)
 
     def _init_symbols(self, INITIAL_PIECES):
@@ -407,21 +413,29 @@ class SentencePieceTrainer(object):
 # for development testing
 if __name__ == "__main__":
     # list of strings
-    string_data = list(line.strip() for line in open(
-        './data/botchan.txt', 'r', encoding='utf8'))
-    # train model
-    model = SentencePieceTrainer.train(string_data, vocab_size=5000)
-    alphabet = set('abcdefghijklmnopqrstuvwxyz')
-    for (i, s, c) in model.vocab:
-        if len(s) == 1 and s in alphabet:
-            alphabet.remove(s)
-        if (i < 500):
-            print(f"{i:<5}{s:25}{c:20}")
-    print(f"Letters not in vocab: {alphabet}")
-    # example sentence (string)
-    sentences = ['I saw a girl with a telescope.']
-    # segmenting the sentence
-    encoding = model.encode(sentences)
+    # string_data = list(line.strip() for line in open(
+    #     './data/botchan_mid.txt', 'r', encoding='utf8'))
+    # # train model
+    # model = SentencePieceTrainer.train(string_data, vocab_size=5000)
+    # alphabet = set('abcdefghijklmnopqrstuvwxyz')
+    # for (i, s, c) in model.vocab:
+    #     if len(s) == 1 and s in alphabet:
+    #         alphabet.remove(s)
+    #     if (i < 500):
+    #         print(f"{i:<5}{s:25}{c:20}")
+    # print(f"Letters not in vocab: {alphabet}")
+    # # example sentence (string)
+    # sentences = ['I saw a girl with a telescope.']
+    # # segmenting the sentence
+    # encoding = model.encode(sentences)
 
-    for i in range(len(sentences)):
-        print(" ".join(encoding[i]))
+    # for i in range(len(sentences)):
+    #     print(" ".join(encoding[i]))
+
+    INITIAL_PIECES = [SentencePiece(index=0, symbol='<unk>', log_freq=0),
+                      SentencePiece(3, "abc|aba", log_freq=-1.),
+                      SentencePiece(4, "b+", log_freq=-2.),
+                      SentencePiece(5, "ab+c", log_freq=-2.)]
+    model = SentencePieceTrainer.train(["▁abcabbcabbbcabbbbbbcabaaba"],
+                                       initial_pieces=INITIAL_PIECES, complex_pieces=True, vocab_size=2)
+    model.save('./sent_test')
