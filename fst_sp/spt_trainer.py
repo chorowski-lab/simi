@@ -90,7 +90,9 @@ class SentencePieceTrainer(object):
     #
     # Also, the parameters are subjects for change (specifically addition).
     @staticmethod
-    def train(sentences, vocab_size=110, prune_fact=0.85, num_subiter=2, seed_vocab_size=10000000, max_piece_length=100, verbose=False, complex_pieces=False, initial_pieces=None) -> SentencePieceModel:
+    def train(sentences, initial_pieces=None, vocab_size=110, prune_fact=0.85, num_subiter=2,
+              seed_vocab_size=10000000, max_piece_length=100, verbose=False,
+              complex_pieces=False, expected_multi_length=5, unk_penalty=10, reproduce_unk_bug=True) -> SentencePieceModel:
 
         types = [type(s) for s in sentences]
 
@@ -114,7 +116,10 @@ class SentencePieceTrainer(object):
 
         t1 = time.time()
         # Sentencepiece training
-        T = SentencePieceTrainer(pieces, complex_pieces=complex_pieces)
+        T = SentencePieceTrainer(pieces, complex_pieces=complex_pieces,
+                                 expected_multi_length=expected_multi_length,
+                                 unk_penalty=unk_penalty,
+                                 reproduce_unk_bug=reproduce_unk_bug)
 
         while True:
             t00 = time.time()
@@ -152,10 +157,11 @@ class SentencePieceTrainer(object):
 
         return SentencePieceModel(model=sp_to_char, pieces=pieces)
 
-    def __init__(self, INITIAL_PIECES, complex_pieces=False, expected_multi_length=5):
+    def __init__(self, INITIAL_PIECES, complex_pieces=False,
+                 expected_multi_length=5, unk_penalty=10, reproduce_unk_bug=True):
         self._complex_pieces = complex_pieces
-        self._unk_penalty = 10
-        self._reproduce_unk_bug = True
+        self._unk_penalty = unk_penalty
+        self._reproduce_unk_bug = reproduce_unk_bug
         # self._reproduce_counting_bug = True
         self._looping_weight = float(
             expected_multi_length) / (expected_multi_length + 1)
