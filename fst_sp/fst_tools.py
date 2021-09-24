@@ -40,9 +40,10 @@ def text_to_matrix(text, char_symb=None, prepend_space=True):
     return matrix.Matrix(out_np)
 
 
-def get_lattice(sentence_text, sp_to_char, prepend_space=True):
-    opts = decoder.LatticeFasterDecoderOptions()
-    dec = decoder.LatticeFasterDecoder(sp_to_char, opts)
+def get_lattice(sentence_text, sp_to_char, prepend_space=True, lattice_opts=None):
+    if lattice_opts is None:
+        lattice_opts = decoder.LatticeFasterDecoderOptions()
+    dec = decoder.LatticeFasterDecoder(sp_to_char, lattice_opts)
     sentence_mat = text_to_matrix(
         sentence_text, char_symb=sp_to_char.input_symbols(), prepend_space=prepend_space)
     dec.decode(decoder.DecodableMatrixScaled(sentence_mat, 1.0))
@@ -65,11 +66,11 @@ def _to_log_lattice(lattice, cfun=lambda x: x.value):
     return lattice_log
 
 
-def viterbi(sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepend_space=True, unigram_weight=1.0):
+def viterbi(sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepend_space=True, unigram_weight=1.0, lattice_opts=None):
     def wcfun(w):
         return unigram_weight * w.value1 + w.value2
     lattice_kaldi = get_lattice(
-        sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
+        sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space, lattice_opts=lattice_opts)
     if normalize_probs:
         lattice_log = _to_log_lattice(lattice_kaldi, wcfun)
         Z = fst.shortestdistance(lattice_log, reverse=True)[
@@ -106,9 +107,9 @@ def viterbi(sentence_text, sp_to_char, nshortest=1, normalize_probs=True, prepen
     return dump_best_path(nbest.start(), [], 0.0)
 
 
-def compute_piece_counts(sentence_text, sp_to_char, prepend_space=True, unigram_weight=1.0):
+def compute_piece_counts(sentence_text, sp_to_char, prepend_space=True, unigram_weight=1.0, lattice_opts=None):
     lattice_kaldi = get_lattice(
-        sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space)
+        sentence_text, sp_to_char=sp_to_char, prepend_space=prepend_space, lattice_opts=lattice_opts)
     # Convert the lattice to log semiring
     # The LatticeWeigth behaves like <Tropical, Tropical> and while it will be faster, the counts will be more approximate
     lattice = _to_log_lattice(
