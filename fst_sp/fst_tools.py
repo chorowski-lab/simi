@@ -3,7 +3,7 @@ import numpy as np
 from kaldi import decoder, matrix
 from kaldi.fstext import SymbolTable
 
-from utils import EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath
+from .utils import EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath
 
 # text_to_matrix
 # get_lattice

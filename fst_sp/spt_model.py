@@ -1,5 +1,5 @@
 #from spt_trainer import SentencePieceTrainer
-import fst_tools
+from . import fst_tools
 import pathlib
 
 

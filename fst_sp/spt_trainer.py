@@ -6,10 +6,10 @@ import numpy as np
 from numpy.ma.core import count
 from scipy.special import digamma, logsumexp
 
-import fst_tools
-from esa import ESA
-from spt_model import SentencePieceModel
-from utils import (EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath,
+from . import fst_tools
+from .esa import ESA
+from .spt_model import SentencePieceModel
+from .utils import (EStepRet, PieceCounts, Sentence, SentencePiece, ViterbiPath,
                    add_dicts, parallelize)
 
 # logger = mpr.log_to_stderr()
@@ -179,25 +179,35 @@ class SentencePieceTrainer(object):
             for char in piece.symbol:
                 if char not in SPECIAL_CHARS and CHAR_SYMB.find_index(char) == -1:
                     CHAR_SYMB.add_symbol(char)
-                # CHAR_SYMB.add_symbol(char)
 
         PIECE_SYMB = fst_tools.SymbolTable()
         PIECE_SYMB.add_symbol('<eps>')
+        PIECE_VARIANT_SYMB = fst_tools.SymbolTable()
+        PIECE_VARIANT_SYMB.add_symbol('<eps>')
+        PVITPI = dict()  # piece's variant index to piece index
         for piece in INITIAL_PIECES[1:]:
             PIECE_SYMB.add_pair(piece.symbol, piece.index)
+            if self._complex_pieces:
+                for i, variant in enumerate(piece.variants()):
+                    PVITPI[PIECE_VARIANT_SYMB.add_symbol(
+                        variant.symbol)] = (piece.index, i)
         PIECE_SYMB.add_symbol('<unk>')
 
         self.CHAR_SYMB = CHAR_SYMB
         self.PIECE_SYMB = PIECE_SYMB
+        self.PIECE_VARIANT_SYMB = PIECE_VARIANT_SYMB
+        self.PVITPI = PVITPI
 
     # Create an FST that matches sentencepieces to texts.
     # This one should be pruned after each iteration to speed things up.
 
-    def get_sp_to_char(self, pieces, arc_type='log', piece_symb=None, char_symb=None):
+    def get_sp_to_char(self, pieces, arc_type='log', piece_symb=None, char_symb=None, emit_variant_id=False):
         if piece_symb is None:
             piece_symb = self.PIECE_SYMB
         if char_symb is None:
             char_symb = self.CHAR_SYMB
+        if emit_variant_id:
+            piece_symb = self.PIECE_VARIANT_SYMB
 
         required_pieces = {
             char_symb.find_symbol(i) for i in range(1, char_symb.num_symbols())
@@ -247,10 +257,10 @@ class SentencePieceTrainer(object):
 
             if self._complex_pieces and piece.symbol[-1] == '+':
                 sp_to_char.add_arc(state, Arc(
-                    char_symb.find_index("<eps>"), piece.index, Weight(-piece.log_freq+next_weight.value), 0))
+                    char_symb.find_index("<eps>"), piece_symb.find_index(piece.piece_symbol if self._complex_pieces and not emit_variant_id else piece.symbol), Weight(-piece.log_freq+next_weight.value), 0))
             else:
                 sp_to_char.add_arc(state, Arc(
-                    char_symb.find_index(piece.symbol[-1]), piece.index, Weight(-piece.log_freq+next_weight.value), 0))
+                    char_symb.find_index(piece.symbol[-1]), piece_symb.find_index(piece.piece_symbol if self._complex_pieces and not emit_variant_id else piece.symbol), Weight(-piece.log_freq+next_weight.value), 0))
 
         unk_penalty = min(
             pieces, key=lambda x: x.log_freq).log_freq - self._unk_penalty
@@ -270,7 +280,8 @@ class SentencePieceTrainer(object):
 
     def EStep(self, pieces, sentences):
 
-        sp_to_char_std = self.get_sp_to_char(pieces, 'standard')
+        sp_to_char_std = self.get_sp_to_char(
+            pieces, 'standard', emit_variant_id=self._complex_pieces)
 
         def worker(sentences, output: mpr.Queue):
             part_counts = defaultdict(float)
@@ -302,8 +313,14 @@ class SentencePieceTrainer(object):
     def MStep(self, pieces, counts, kExpectedFrequencyThreshold=0.5):
         new_pieces = []
         sum_counts = 0
+        if self._complex_pieces:
+            piece_counts = defaultdict(int)
+            for k, v in counts.items():
+                piece_counts[self.PVITPI[k][0]] += v
+        else:
+            piece_counts = counts
         for piece in pieces:
-            count = counts[piece.index]
+            count = piece_counts[piece.index]
 
             # if len(piece.symbol) == 1:
             #     new_pieces.append(SentencePiece(piece.index, piece.symbol, count))
@@ -312,8 +329,17 @@ class SentencePieceTrainer(object):
 
             if count < kExpectedFrequencyThreshold:
                 continue
-            new_pieces.append(SentencePiece(
-                piece.index, piece.symbol, count, piece.weights))
+            if self._complex_pieces:
+                # update piece weights
+                weights = [counts[self.PIECE_VARIANT_SYMB.find_index(
+                    variant.symbol)] for variant in piece.variants()]
+                total_weights = sum(weights)
+                norm_weights = [w/total_weights for w in weights]
+                new_pieces.append(SentencePiece(
+                    piece.index, piece.symbol, count, norm_weights))
+            else:
+                new_pieces.append(SentencePiece(
+                    piece.index, piece.symbol, count, piece.weights))
             sum_counts += count
 
         log_sum = digamma(sum_counts)
@@ -442,6 +468,7 @@ if __name__ == "__main__":
                       SentencePiece(3, "abc|aba", log_freq=-1.),
                       SentencePiece(4, "b+", log_freq=-2.),
                       SentencePiece(5, "ab+c", log_freq=-2.)]
-    model = SentencePieceTrainer.train(["▁abcabbcabbbcabbbbbbcabaaba"],
+    model = SentencePieceTrainer.train(["▁abcabbcabbbcabbbbbbcabaaba"], verbose=True,
                                        initial_pieces=INITIAL_PIECES, complex_pieces=True, vocab_size=2)
     model.save('./sent_test')
+    print(model.pieces)
