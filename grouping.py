@@ -5,7 +5,7 @@ from argparse import ArgumentParser
 from collections import defaultdict
 
 from simi.vectorization import vectorize
-from simi.clusterization import cluster_kmeans
+from simi.clusterization.clusterization import cluster_kmeans
 
 
 def parseArgs():
@@ -27,8 +27,10 @@ def parseArgs():
                         help='Path to the kmeans model, if not specified/empty then it will be computed')
     parser.add_argument('--seed', type=int, default=290956,
                         help='Random seed')
-    parser.add_argument('--eval', action='store_true', 
+    parser.add_argument('--eval', action='store_true',
                         help='Eval only mode (crash if w2v model is not computed)')
+    parser.add_argument('--save_map', action='store_true',
+                        help='Save map of words to new characters)')
     return parser.parse_args()
 
 
@@ -43,10 +45,10 @@ class Segmentation(object):
 
     def to_sentences(self):
         raise NotImplementedError()
-    
+
     def rename(self, word_map):
         raise NotImplementedError()
-    
+
     def save(self, path, filename=None):
         raise NotImplementedError()
 
@@ -66,7 +68,8 @@ class SegmentationCsv(Segmentation):
     def rename(self, word_map):
         for _, sample in self.data.items():
             for i in range(len(sample)):
-                sample[i] = (sample[i][0], sample[i][1], word_map[sample[i][2]], sample[i][3])
+                sample[i] = (sample[i][0], sample[i][1],
+                             word_map[sample[i][2]], sample[i][3])
 
     def save(self, path, filename=None):
         if not os.path.exists(path):
@@ -84,7 +87,7 @@ class SegmentationTxt(Segmentation):
             l = line.strip().split()
             self.data[l[0]] = l[1:]
             self.vocab |= set(l[1:])
-    
+
     def to_sentences(self):
         return list(self.data.values())
 
@@ -109,22 +112,29 @@ def run(args):
         segmentation = SegmentationCsv(args.segmentation)
     print(f'Vocabulary size of the segmentation: {len(segmentation.vocab)}')
 
-    assert len(segmentation.vocab) > args.vocab_size, 'Segmentation vocab size must be greater than the output vocab'
+    assert len(
+        segmentation.vocab) > args.vocab_size, f'Segmentation vocab size ({len(segmentation.vocab)}) must be greater than the output vocab ({args.vocab_size})'
 
     word2vec_path = f'./tmp/word2vec/s{args.seed}' if args.word2vec_path is None else args.word2vec_path
     sentences = segmentation.to_sentences()
-    encodings, weights, reconstruct, build_map = vectorize(sentences, word2vec_path, args.word2vec_size, train=not args.eval)
-
+    encodings, weights, reconstruct, build_map = vectorize(
+        sentences, word2vec_path, args.word2vec_size, train=not args.eval)
 
     kmeans_path = f'./tmp/kmeans/s{args.seed}_cosine' if args.kmeans_path is None else args.kmeans_path
-    labels = cluster_kmeans(encodings, weights, kmeans_path, args.vocab_size, cosine=True)
+    labels = cluster_kmeans(
+        encodings, weights, kmeans_path, args.vocab_size, cosine=True)
 
     word_map = build_map(labels)
     segmentation.rename(word_map)
-    segmentation.save(args.output, filename=f'clustered_outputs_{args.vocab_size}.txt')
+    segmentation.save(
+        args.output, filename=f'clustered_outputs_{args.vocab_size}.txt')
+    if args.save_map:
+        with open(args.output / 'word_map.txt', 'w', encoding='utf8') as out:
+            for k, v in word_map.items():
+                out.write(f'{k} {v}\n')
     print('Done!')
 
-    
+
 if __name__ == "__main__":
     args = parseArgs()
     run(args)
