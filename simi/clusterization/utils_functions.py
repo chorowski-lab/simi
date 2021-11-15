@@ -19,7 +19,7 @@ def writeArgs(pathArgs, args):
     with open(pathArgs, 'w') as file:
         json.dump(vars(args), file, indent=2)
 
-def loadCPCFeatureMaker(pathCheckpoint, gru_level=-1, get_encoded=False, keep_hidden=True):
+def loadCPCFeatureMaker(pathCheckpoint, gru_level=-1, get_encoded=False, keep_hidden=True, load_nullspace=False, pcaPath=None):
     """
     Load CPC Feature Maker from CPC checkpoint file.
     """
@@ -30,13 +30,13 @@ def loadCPCFeatureMaker(pathCheckpoint, gru_level=-1, get_encoded=False, keep_hi
         updateConfig = None
 
     # Load CPC model
-    model, nHiddenGar, nHiddenEncoder = loadModel([pathCheckpoint], updateConfig=updateConfig)
+    model, nHiddenGar, nHiddenEncoder = loadModel([pathCheckpoint], updateConfig=updateConfig, load_nullspace=load_nullspace, pcaPath=pcaPath)
     
     # Keep hidden units at LSTM layers on sequential batches
     model.gAR.keepHidden = keep_hidden
 
     # Build CPC Feature Maker from CPC model
-    featureMaker = FeatureModule(model, get_encoded=get_encoded)
+    featureMaker = FeatureModule(model, get_encoded=get_encoded, cpcLevel=0)
 
     return featureMaker
 
